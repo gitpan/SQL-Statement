@@ -11,12 +11,13 @@ package SQL::Parser;
 ######################################################################
 
 use strict;
+use warnings;
 use vars qw($VERSION);
 use constant FUNCTION_NAMES => join '|', qw(
     TRIM SUBSTRING UPPER LOWER TO_CHAR
 );
 
-$VERSION = '1.06';
+$VERSION = '1.07';
 
 BEGIN { if( $ENV{SQL_USER_DEFS} ) { require SQL::UserDefs; } }
 
@@ -53,6 +54,7 @@ sub parse {
     $self->{"struct"} = {};
     $self->{"tmp"} = {};
     $self->{"original_string"} = $sql;
+    $self->{struct}->{"original_string"} = $sql;
 
     ################################################################
     #
@@ -110,11 +112,25 @@ $self->{struct}->{table_names} = \@uTables unless $com eq 'CREATE';
                  $self->{struct}->{ORG_NAME}->{uc $_};
 	}
 	}
-#$self->{struct}->{org_col_names} = $self->{struct}->{column_names};
+$self->{struct}->{join}->{table_order}
+    = $self->{struct}->{table_names}
+   if $self->{struct}->{join}->{table_order}
+  and scalar(@{$self->{struct}->{join}->{table_order}}) == 0;
+@{$self->{struct}->{join}->{keycols}}
+     = map {uc $_ } @{$self->{struct}->{join}->{keycols}}
+    if $self->{struct}->{join}->{keycols};
+@{$self->{struct}->{join}->{shared_cols}}
+    = map {uc $_ } @{$self->{struct}->{join}->{shared_cols}}
+    if $self->{struct}->{join}->{shared_cols};
 my @uCols = map {uc $_ } @{$self->{struct}->{column_names}};
 $self->{struct}->{column_names} = \@uCols unless $com eq 'CREATE';
 	if ($self->{original_string} =~ /Y\.\*/) {
 #use mylibs; zwarn $self; exit;
+	}
+	if ($com eq 'SELECT') {
+#use Data::Dumper;
+#print Dumper $self->{struct}->{join};
+#exit;
 	}
         return $rv;
     } 
@@ -414,23 +430,49 @@ sub EXPLICIT_JOIN {
           if ( $remainder && $remainder =~ /^(.+?) ON (.+)/) {
               $self->{"struct"}->{"join"}->{"clause"} = 'ON';
               $tableB = $1;
+#zzz
+#print "here";
+#print 9 if $self->can('TABLE_NAME_LIST');
+#return undef unless $self->TABLE_NAME_LIST($tableA.','.$tableB);
+#print "there";
+#exit;
+
               my $keycolstr = $2;
               $remainder = $3;
               if ($keycolstr =~ / OR /i ) {
                   return $self->do_err(qq~Can't use OR in an ON clause!~,1);
 	      }
               @$keycols = split / AND /i,$keycolstr;
-              $self->{"tmp"}->{"is_table_name"}->{"$tableA"} = 1;
-              $self->{"tmp"}->{"is_table_name"}->{"$tableB"} = 1;
+#zzz
+return undef unless $self->TABLE_NAME_LIST($tableA.','.$tableB);
+#              $self->{"tmp"}->{"is_table_name"}->{"$tableA"} = 1;
+#              $self->{"tmp"}->{"is_table_name"}->{"$tableB"} = 1;
               for (@$keycols) {
+                  my %is_done;
                   my($arg1,$arg2) = split / = /;
-                  return undef unless $arg1 = $self->ROW_VALUE($arg1);
-                  return undef unless $arg2 = $self->ROW_VALUE($arg2);
-                  if ( $arg1->{"type"}eq 'column' and $arg2->{"type"}eq 'column'){
-                      push @{ $self->{"struct"}->{"keycols"} }, $arg1->{"value"};
-                      push @{ $self->{"struct"}->{"keycols"} }, $arg2->{"value"};
-                      delete $self->{"struct"}->{"where_clause"};
-	          }
+                  my($c1,$c2)=($arg1,$arg2);
+                  $c1 =~ s/^.*\.([^\.]+)$/$1/;
+                  $c2 =~ s/^.*\.([^\.]+)$/$1/;
+                  if ($c1 eq $c2) {
+                      return undef unless $arg1 = $self->ROW_VALUE($c1);
+                      if ( $arg1->{type} eq 'column' and !$is_done{$c1}
+                      ){
+                          push @{$self->{struct}->{keycols}},$arg1->{value};
+                          $is_done{$c1}=1;
+ 	              }
+                  }
+                  else {
+                      return undef unless $arg1 = $self->ROW_VALUE($arg1);
+                      return undef unless $arg2 = $self->ROW_VALUE($arg2);
+                      if ( $arg1->{"type"}eq 'column'
+                      and $arg2->{"type"}eq 'column'){
+                          push @{ $self->{"struct"}->{"keycols"} }
+                              , $arg1->{"value"};
+                           push @{ $self->{"struct"}->{"keycols"} }
+                              , $arg2->{"value"};
+                           # delete $self->{"struct"}->{"where_clause"};
+	              }
+                  }
               }
           }
           elsif ($remainder =~ /^(.+?)$/i) {
@@ -439,19 +481,20 @@ sub EXPLICIT_JOIN {
           }
           $remainder =~ s/^\s+// if $remainder;
       }
+
       if ($jtype) {
-        $jtype = "NATURAL $jtype" if $natural;
-        if ($natural and $keycols) {
-           return $self->do_err(
-               qq~Can't use NATURAL with a USING or ON clause!~
-           );
-	}
-        return undef unless $self->TABLE_NAME_LIST("$tableA,$tableB");
-        $self->{"struct"}->{"join"}->{"type"}    = $jtype;
-        $self->{"struct"}->{"join"}->{"keycols"} = $keycols if $keycols;
-        return 1;
-    }
-    return $self->do_err("Couldn't parse explicit JOIN!");
+          $jtype = "NATURAL $jtype" if $natural;
+          if ($natural and $keycols) {
+              return $self->do_err(
+                  qq~Can't use NATURAL with a USING or ON clause!~
+              );
+	  }
+          return undef unless $self->TABLE_NAME_LIST("$tableA,$tableB");
+          $self->{"struct"}->{"join"}->{"type"}    = $jtype;
+          $self->{"struct"}->{"join"}->{"keycols"} = $keycols if $keycols;
+          return 1;
+      }
+      return $self->do_err("Couldn't parse explicit JOIN!");
 }
 
 sub SELECT_CLAUSE {
@@ -956,7 +999,8 @@ sub parens_search {
     if ($str =~ s/\(([^()]+)\)/^$index^/ ) {
         push @$predicates, $1;
     }
-    if ($str =~ /\(/ ) {
+# patch from Chromatic
+    if ($str =~ /\((?!\))/ ) {
         return $self->parens_search($str,$predicates);
     }
     else {
@@ -1401,7 +1445,6 @@ sub COLUMN_NAME {
       $col_name   = $2;
 #      my $alias = $self->{struct}->{table_alias} || [];
 #      $table_name = shift @$alias if $alias;
-#print "$table_name : $alias";
       return undef unless $self->TABLE_NAME($table_name);
       $table_name = $self->replace_quoted_ids($table_name);
       my $ref;
@@ -1413,7 +1456,8 @@ sub COLUMN_NAME {
                 "Table '$table_name' referenced but not found in FROM list!"
           );
           return undef;
-      } }
+      } 
+      }
       elsif (!$self->{"tmp"}->{"is_table_name"}->{"\L$table_name"}
        and !$self->{"tmp"}->{"is_table_alias"}->{"\L$table_name"}
          ) {
@@ -1512,6 +1556,7 @@ sub TABLE_NAME_LIST {
 	}
         return undef unless $self->TABLE_NAME($table);
         $table = $self->replace_quoted_ids($table);
+# zzz
         push @tables, $table;
         if ($alias) {
 #die $alias, $table;
@@ -1528,7 +1573,6 @@ sub TABLE_NAME_LIST {
 #            $aliases{$alias} = $table;
 	}
     }
-    
 #    my %is_table_name = map { $_ => 1 } @tables,keys %aliases;
     my %is_table_name = map { lc $_ => 1 } @tables;
     #%is_table_alias = map { lc $_ => 1 } @aliases;

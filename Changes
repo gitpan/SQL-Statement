@@ -1,5 +1,14 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.07, released 20 April, 2004
+-------------------------------------
+
+ * fixed infinite recursion bug with empty IN() predicate
+   thanks chromatic, for the patch
+
+ * fixed case issues with table aliases in joins
+   thanks chromatic, for bug report
+
 Version 1.06, released 18 April, 2004
 -------------------------------------
 

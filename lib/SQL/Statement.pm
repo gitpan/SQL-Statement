@@ -29,7 +29,7 @@ BEGIN {
 
 #use locale;
 
-$VERSION = '1.06';
+$VERSION = '1.07';
 
 $dlm = '~';
 $arg_num=0;
@@ -462,7 +462,6 @@ sub JOIN {
     return undef unless $eval;
     $eval->params($params);
     $self->verify_columns( $eval, $all_cols );
-###new
     if ($self->{"join"}->{"keycols"} 
      and $self->{"join"}->{"table_order"}
      and scalar @{$self->{"join"}->{"table_order"}} == 0
@@ -471,17 +470,13 @@ sub JOIN {
             $self->{"join"}->{"keycols"}
         );
     }
-###newend
-    my @tables = $self->tables;
-    @tables = map {$_->name} @tables;
-
+    my  @tables = $self->tables;
     # GET THE LIST OF QUALIFIED COLUMN NAMES FOR DISPLAY
     # *IN ORDER BY NAMING OF TABLES*
     #
     my @all_cols;
     for my $table(@tables) {
-        my @cols = @{ $eval->table($table)->col_names };
-#@cols = map {lc $_} @cols;
+        my @cols = @{ $eval->table($table->{name})->col_names };
         for (@cols) {
             push @all_cols, $table . $dlm . $_;
 	}
@@ -498,20 +493,10 @@ sub JOIN {
     my $tableB;
     $tableA = shift @tables;
     $tableB = shift @tables;
+    $tableA = $tableA->{name} if ref $tableA;
+    $tableB = $tableB->{name} if ref $tableB;
     my $tableAobj = $eval->table($tableA);
     my $tableBobj = $eval->table($tableB);
-#use mylibs; print $tableA; zwarn $tableAobj; exit;
-    $tableAobj->{"REAL_NAME"} = $tableAobj->{"NAME"} ||= $tableA;
-    $tableBobj->{"REAL_NAME"} = $tableBobj->{"NAME"} ||= $tableB;
-    if (my $aliasA = $self->{table_alias}->{$tableA}) {
-        $tableAobj->{"NAME"} = shift @{$self->{table_alias}->{$tableA}};
-    }
-    if (my $aliasB = $self->{table_alias}->{$tableB}) {
-        $tableBobj->{"NAME"} =  shift @{$self->{table_alias}->{$tableB}} ;
-    }
-
-#use mylibs; zwarn $self;
-#die "$tableA,$tableB";
     $self->join_2_tables($data,$params,$tableAobj,$tableBobj);
     for my $next_table(@tables) {
         $tableAobj = $self->{"join"}->{"table"};
@@ -532,6 +517,8 @@ sub join_2_tables {
     $share_type    = 'NATURAL' if $self->{"join"}->{"type"} =~ /NATURAL/;
     $share_type    = 'USING'   if $self->{"join"}->{"clause"} =~ /USING/;
     $share_type    = 'ON' if $self->{"join"}->{"clause"} =~ /ON/;
+    $share_type    = 'USING' if $share_type eq 'ON'
+                            and scalar @{ $self->{join}->{keycols} } == 1;
     my $join_type  = 'INNER';
     $join_type     = 'LEFT'  if $self->{"join"}->{"type"} =~ /LEFT/;
     $join_type     = 'RIGHT' if $self->{"join"}->{"type"} =~ /RIGHT/;
@@ -590,10 +577,7 @@ sub join_2_tables {
             next unless ($iscolA{$k2} or $iscolB{$k2});
             next if !$iscolB{$k1} and !$iscolB{$k2};
             my($t,$c) = $k1 =~ /^([^$dlm]+)$dlm(.+)$/;
-###new
             next if !$isunqualA{$c};
-#            next if !$isunqualB{$c};
-###newend
             push @shared_cols, $k1 unless $is_shared{$k1}++;
             ($t,$c) = $k2 =~ /^([^$dlm]+)$dlm(.+)$/;
             next if !$isunqualB{$c};
@@ -601,7 +585,6 @@ sub join_2_tables {
         }
     }
     %is_shared = map {$_=>1} @shared_cols;
-#    $self->do_err("Can't find shared columns!") unless @shared_cols;
     for my $c(@shared_cols) {
       if ( !$iscolA{$c} and !$iscolB{$c} ) {
           $self->do_err("Can't find shared columns!");
@@ -612,9 +595,7 @@ sub join_2_tables {
          push @$posA, $col_numsA->{$f} if $iscolA{$f};
          push @$posB, $col_numsB->{$f} if $iscolB{$f};
     }
-    if ($share_type eq 'ON') {
-}
-
+#use mylibs; zwarn $self->{join};
     # CYCLE THROUGH TABLE B, CREATING A HASH OF ITS VALUES
     #
     my $hashB={};
@@ -626,7 +607,6 @@ sub join_2_tables {
         my $hashkey = join ' ',@key_vals;
         push @{$hashB->{"$hashkey"}}, $array;
     }
-
     # CYCLE THROUGH TABLE A
     #
     my $joined_table;
@@ -1086,20 +1066,18 @@ sub process_predicate {
                     : $s2pops->{"$op"}->{'s'};
 	    }
         }
-#        print "[$val1] [$op] [$val2]\n";
         my $neg = $pred->{"neg"};
-        my($table) = $eval->table($self->tables(0)->name());
-    if ( $pred->{op} eq '=' and !$neg and $table->can('fetch_one_row')
-       ) {
-        my $key_col = $table->fetch_one_row(1,1);
-        if ($pred->{arg1}->{value} =~ /^$key_col$/i) {
-            $self->{fetched_from_key}=1;
-            $self->{fetched_value} = $table->fetch_one_row(
-                0,$val2
-            );
-            return 1;
+        if (ref $eval !~ /TempTable/) {
+            my($table) = $eval->table($self->tables(0)->name());
+            if ($pred->{op} eq '=' and !$neg and $table->can('fetch_one_row')){
+                my $key_col = $table->fetch_one_row(1,1);
+                if ($pred->{arg1}->{value} =~ /^$key_col$/i) {
+                    $self->{fetched_from_key}=1;
+                    $self->{fetched_value} = $table->fetch_one_row(0,$val2);
+                    return 1;
+	        }
+            }
 	}
-    }
         my $match = $self->is_matched($val1,$op,$val2) || 0;
         if ($pred->{"neg"}) {
            $match = $match ? 0 : 1;
@@ -1265,7 +1243,6 @@ sub verify_columns {
 
     my %col_exists   = map {$_=>1} @tmp_cols;
 
-
     my %short_exists = map {s/^([^.]*)\.(.*)/$1/; $2=>$1} @tmp_cols;
     my(%is_member,@duplicates,%is_duplicate);
     @duplicates = map {s/[^.]*\.(.*)/$1/; $_} @$all_cols;
@@ -1369,10 +1346,9 @@ sub verify_columns {
 #use mylibs; zwarn \%col_exists;
 #print "<$table . $col>";
                return $self->do_err("No such column '$table.$col'")
-#                     unless $col_exists{"\L$table.$col"};
                      unless $col_exists{"$table.$col"}
                       or $col_exists{"\L$table.".$col};
-;#                         or $col_exists{qq/$table."/.$self->{ORG_NAME}->{$col}.qq/"/}
+;#                        or $col_exists{qq/$table."/.$self->{ORG_NAME}->{$col}.qq/"/}
 ;
            }
            next if $is_fully->{"$table.$col"};
@@ -1800,6 +1776,7 @@ sub new {
     my $table      = shift;
     my $col_nums;
     for my $i(0..scalar @$col_names -1) {
+      $col_names->[$i]= uc $col_names->[$i];
       $col_nums->{"$col_names->[$i]"}=$i;
     }
     my @display_order = map { $col_nums->{$_} } @$table_cols;
@@ -1810,6 +1787,7 @@ sub new {
         table      => $table,
         NAME       => $name,
     };
+    # use mylibs; zwarn $self; exit;
     return bless $self, $class;
 }
 sub is_shared {my($s,$colname)=@_;return $s->{"is_shared"}->{"$colname"}}
