@@ -1,4 +1,11 @@
-1999-08-23  Jochen Wiedmann  <joe@ispsoft.de> 
+1999-08-29  Jochen Wiedmann  <joe@ispsoft.de> (0.1016)
+
+	* lib/SQL/Statement.pm: Fixed a portability problem with Perl
+	  5.004. (sort $coderef @list works with 5.005 only.) My thanks
+	  to Paul J. Schinder <schinder@pobox.com> and Kevin Georgison
+	  <georgkev@mbnet.mb.ca> for pointing me to this.
+
+1999-08-23  Jochen Wiedmann  <joe@ispsoft.de>  (0.1015)
 
 	* lib/SQL/Statement.pm (SELECT): Added support for DISTINCT.
 

@@ -589,7 +589,7 @@ __yy_memcpy (char *to, char *from, unsigned int count)
 #ifdef YYPARSE_PARAM
 int yyparse (void *);
 #else
-int yyparse(void* stmt);
+int yyparse (void);
 #endif
 #endif
 

@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1015';
+$VERSION = '0.1016';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -305,9 +305,13 @@ sub SELECT ($$) {
 		} else {
 		    $prev = $_;
 		}
-	    } sort $sortFunc @$rows;
+	    } ($] > 5.00504 ?
+	       sort $sortFunc @$rows :
+	       sort { &$sortFunc } @$rows);
 	} else {
-	    @$rows = sort $sortFunc @$rows;
+	    @$rows = $] > 5.00504 ?
+		(sort $sortFunc @$rows) :
+		(sort { &$sortFunc } @$rows)
 	}
 
 	# Rip off columns that have been added for @extraSortCols only
