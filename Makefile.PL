@@ -46,3 +46,12 @@ README: lib/SQL/Statement.pm
 
 EOF
 }
+
+sub libscan {
+    my($self, $path) = @_;
+    if ($path =~ /\~$/) {
+	undef;
+    } else {
+	$path;
+    }
+}

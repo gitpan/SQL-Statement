@@ -1364,21 +1364,6 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
         return EOF;
     }
 
-    if (FEATURE(misc, files_as_tables)  &&
-	(*queryPtr == '/'  ||
-	 (*queryPtr == '.'  &&
-	  ((queryPtr+1 < queryEnd  &&  queryPtr[1] == '/')  ||
-	   (queryPtr+2 < queryEnd  &&  queryPtr[1] == '.'  &&
-	    queryPtr[2] == '/'))))) {
-        while (queryPtr < queryEnd  &&  !isspace(*queryPtr)) {
-	    ++queryPtr;
-	}
-	lvalp->ident_val.ptr = stmt->queryPtr;
-	lvalp->ident_val.len = queryPtr - stmt->queryPtr;
-	stmt->queryPtr = queryPtr;
-	return IDENT;
-    }
-
     if (*queryPtr == '-'  ||  *queryPtr == '.'  ||
 	(*queryPtr >= '0'  &&  *queryPtr <= '9')) {
 	/*

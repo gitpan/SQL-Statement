@@ -148,7 +148,7 @@ sub Test($) {
 }
 
 
-print "1..47\n";
+print "1..56\n";
 
 my($parser);
 Test($parser = SQL::Parser->new('Ansi'));
@@ -237,3 +237,22 @@ $@ = '';
 eval { $stmt->execute(); };
 Test($@);
 
+
+Test($stmt = MyStatement->new("CREATE TABLE foo (n1 INT, n2 INT,"
+			      . " s1 CHAR(64), s2 CHAR(64))", $parser));
+Test($stmt->execute($db));
+my @rows = (["1", "-01", "a", "a"],
+	    ["3", "2", "c", "b"],
+	    ["2", "-4", "b", "d"],
+	    ["4", "04", "d", "c"]);
+Test($stmt = MyStatement->new("INSERT INTO foo (n1, n2, s1, s2)"
+			      . " VALUES (?, ?, ?, ?)", $parser));
+my $row;
+foreach $row (@rows) {
+    Test($stmt->execute($db, $row));
+}
+
+Test($stmt = MyStatement->new("SELECT n1, n2 FROM foo WHERE n1 = n2"));
+Test($stmt->execute($db));
+#Test(ArrEq($stmt->{'data'},
+#	   [ [ "4", "04" ] ]));

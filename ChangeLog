@@ -1,3 +1,8 @@
+1998-06-25  Jochen Wiedmann  <joe@ispsoft.de> (0.1003)
+
+	* lib/SQL/Statement.pm: Fixed bug in "ORDER BY" with numeric
+	  columns. Removed misc.files_as_tables feature.
+
 1998-05-20  Jochen Wiedmann  <joe@ispsoft.de> (0.1002)
 
 	* Added misc.files_as_tables feature

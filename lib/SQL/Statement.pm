@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1002';
+$VERSION = '0.1003';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -242,7 +242,8 @@ sub SELECT ($$) {
 			$result = -1;
 		    } elsif (!defined($d)) {
 			$result = 1;
-		    } elsif ($c =~ /^\s*\d/  &&  $d =~ /^\s*\d/) {
+		    } elsif ($c =~ /^\s*[+-]?\s*\.?\s*\d/  &&
+			     $d =~ /^\s*[+-]?\s*\.?\s*\d/) {
 			$result = ($c <=> $d);
 		    } else {
 			$result = $c cmp $d;
@@ -411,12 +412,6 @@ This enables the use of multiple tables in a SELECT statement, for
 example
 
   SELECT a.id, b.name FROM a, b WHERE a.id = b.id AND a.id = 2
-
-=item misc.files_as_tables
-
-By default table names must be simple identifiers. This feature
-forces the acceptance of file names as tables. However, file
-names must start with '/', './' or '../'.
 
 =back
 
