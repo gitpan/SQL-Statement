@@ -758,6 +758,19 @@ op(class, op)
     RETVAL
 
 
+bool
+distinct(self)
+    SV* self
+  PROTOTYPE: $
+  CODE:
+    {
+        sql_stmt_t* stmt = SV2stmt(self);
+	RETVAL = stmt->distinct;
+    }
+  OUTPUT:
+    RETVAL
+
+
 void
 val(self, num=NULL)
     SV* self

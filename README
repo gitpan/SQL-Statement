@@ -320,8 +320,8 @@ DESCRIPTION
     UPDATE
     DELETE
     SELECT  Called by `execute' for doing the real work. Usually they create an
-            SQL::Eval object by calling `$self-'open_tables()>, call `$self-
-            'verify_columns()> and then do their job. Finally they return
+            SQL::Eval object by calling `$self->open_tables()', call `$self-
+            >verify_columns()' and then do their job. Finally they return
             the triple
 
                 ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},

@@ -1,3 +1,22 @@
+1999-08-23  Jochen Wiedmann  <joe@ispsoft.de> 
+
+	* lib/SQL/Statement.pm (SELECT): Added support for DISTINCT.
+
+1999-05-25  Jochen Wiedmann  <joe@ispsoft.de> (0.1014)
+
+	* lib/SQL/Statement.pm (SELECT): Added the possibility to use
+	  placeholders in the SELECT field list.
+
+1999-04-04  Jochen Wiedmann  <joe@ispsoft.de> (0.1013)
+
+	* sql_yacc.y: Added IS NOT NULL.
+
+1999-04-04  Jochen Wiedmann  <joe@ispsoft.de> (0.1012)
+
+	* Minor portability fixes.
+	* $stmt->where() was working with SELECT only and not with
+	  UPDATE and DELETE.
+
 1999-03-03  Jochen Wiedmann  <joe@ispsoft.de> (0.1011)
 
 	* lib/SQL/Statement.pm (SELECT): Added the ability to order by

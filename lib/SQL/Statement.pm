@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1012';
+$VERSION = '0.1015';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -184,7 +184,18 @@ sub SELECT ($$) {
     my %columns;
     my @names;
     foreach my $column ($self->columns()) {
-	($col, $tbl) = ($column->name(), $column->table());
+	if (ref($column) eq 'SQL::Statement::Param') {
+	    my $val = $eval->param($column->num());
+	    if ($val =~ /(.*)\.(.*)/) {
+		$col = $1;
+		$tbl = $2;
+	    } else {
+		$col = $val;
+		$tbl = $tableName;
+	    }
+	} else {
+	    ($col, $tbl) = ($column->name(), $column->table());
+	}
 	if ($col eq '*') {
 	    $ar = $table->col_names();
 	    for ($i = 0;  $i < @$ar;  $i++) {
@@ -205,12 +216,35 @@ sub SELECT ($$) {
 
     my @order_by = $self->order();
     my @extraSortCols;
+    my $distinct = $self->distinct();
+    if ($distinct) {
+	# Silently extend the ORDER BY clause to the full list of
+	# columns.
+	my %ordered_cols;
+	foreach my $column (@order_by) {
+	    ($col, $tbl) = ($column->column(), $column->table());
+	    $ordered_cols{$tbl}->{$col} = 1;
+	}
+	while (my($tbl, $cref) = each %columns) {
+	    foreach my $col (keys %$cref) {
+		if (!$ordered_cols{$tbl}->{$col}) {
+		    $ordered_cols{$tbl}->{$col} = 1;
+		    push(@order_by,
+			 SQL::Statement::Order->new
+			 ('col' => SQL::Statement::Column->new
+			  ({'table' => $tbl,
+			    'column' => $col}),
+			  'desc' => 0));
+		}
+	    }
+	}
+    }
     if (@order_by) {
 	my $nFields = $numFields;
 	# It is possible that the user gave an ORDER BY clause with columns
-	# that are not part of $cList yet.
-	# from $cList).  These columns will need to be present in the
-	# array of arrays for sorting, but will be stripped off later.
+	# that are not part of $cList yet. These columns will need to be
+	# present in the array of arrays for sorting, but will be stripped
+	# off later.
 	foreach my $column (@order_by) {
 	    ($col, $tbl) = ($column->column(), $column->table());
 	    next if exists($columns{$tbl}->{$col});
@@ -232,8 +266,9 @@ sub SELECT ($$) {
 	my @sortCols = map {
 	    ($columns{$_->table()}->{$_->column()}, $_->desc())
 	} @order_by;
-	my($c, $d, $result, $colNum, $desc);
-	@$rows = sort {
+	my($c, $d, $colNum, $desc);
+	my $sortFunc = sub {
+	    my $result;
 	    $i = 0;
 	    do {
 		$colNum = $sortCols[$i++];
@@ -241,7 +276,7 @@ sub SELECT ($$) {
 		$c = $a->[$colNum];
 		$d = $b->[$colNum];
 		if (!defined($c)) {
-		    $result = -1;
+		    $result = defined $d ? -1 : 0;
 		} elsif (!defined($d)) {
 		    $result = 1;
 		} elsif ($c =~ /^\s*[+-]?\s*\.?\s*\d/  &&
@@ -253,9 +288,27 @@ sub SELECT ($$) {
 		if ($desc) {
 		    $result = -$result;
 		}
-	    } while ($result == 0  &&  $i < @sortCols);
+	    } while (!$result  &&  $i < @sortCols);
 	    $result;
-	} @$rows;
+	};
+	if ($distinct) {
+	    my $prev;
+	    @$rows = map {
+		if ($prev) {
+		    $a = $_;
+		    $b = $prev;
+		    if (&$sortFunc() == 0) {
+			();
+		    } else {
+			$prev = $_;
+		    }
+		} else {
+		    $prev = $_;
+		}
+	    } sort $sortFunc @$rows;
+	} else {
+	    @$rows = sort $sortFunc @$rows;
+	}
 
 	# Rip off columns that have been added for @extraSortCols only
 	if (@extraSortCols) {
@@ -305,6 +358,11 @@ sub num ($) { shift->{'num'}; }
 
 package SQL::Statement::Order;
 
+sub new ($$) {
+    my $proto = shift;
+    my $self = {@_};
+    bless($self, (ref($proto) || $proto));
+}
 sub table ($) { shift->{'col'}->table(); }
 sub column ($) { shift->{'col'}->name(); }
 sub desc ($) { shift->{'desc'}; }
@@ -707,8 +765,8 @@ prevent garbage collection.)
 =item SELECT
 
 Called by C<execute> for doing the real work. Usually they create an
-SQL::Eval object by calling C<$self->open_tables()>, call
-C<$self->verify_columns()> and then do their job. Finally they return
+SQL::Eval object by calling C<$self-E<gt>open_tables()>, call
+C<$self-E<gt>verify_columns()> and then do their job. Finally they return
 the triple
 
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},

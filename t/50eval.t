@@ -129,9 +129,21 @@ sub ArrEq($$) {
 		printf("Mismatch in type: scalar vs. ref\n");
 		return 0;
 	    }
-	    if ($elem1 ne $elem2) {
-		printf("Mismatch: $elem1 vs. $elem2\n");
-		return 0;
+	    if (defined($elem1)) {
+		if (defined($elem2)) {
+		    if ($elem1 ne $elem2) {
+			printf("Mismatch: $elem1 vs. $elem2\n");
+			return 0;
+		    }
+		} else {
+		    printf("Mismatch: $elem1 vs. undef\n");
+		    return 0;
+		}
+	    } else {
+		if (defined($elem2)) {
+		    printf("Mismatch: $elem1 vs. undef\n");
+		    return 0;
+		}
 	    }
 	}
 	++$i;
@@ -149,7 +161,7 @@ sub Test($) {
 }
 
 
-print "1..103\n";
+print "1..130\n";
 
 my($parser);
 Test($parser = SQL::Parser->new('Ansi'));
@@ -337,7 +349,50 @@ Test($stmt->execute($db));
 Test(ArrEq($stmt->{'data'}, [ ['Joel Meulenberg' ] ]));
 Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE '%ber'"));
 Test($stmt->execute($db));
-Test(!ArrEq($stmt->{'data'}, [ ['Joel Meulenberg' ] ]));
+Test(ArrEq($stmt->{'data'}, []));
 Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE 'Joel Meu'"));
 Test($stmt->execute($db));
-Test(!ArrEq($stmt->{'data'}, [ ['Joel Meulenberg' ] ]));
+Test(ArrEq($stmt->{'data'}, []));
+
+
+print "IS NULL stuff...\n";
+Test($stmt = MyStatement->new("CREATE TABLE nulls (id INTEGER,"
+			      . " name VARCHAR(64))", $parser));
+Test($stmt->execute($db));
+Test($stmt = MyStatement->new("INSERT INTO nulls VALUES (?, ?)", $parser));
+Test($stmt->execute($db, [1, 'Tim Bunce']));
+Test($stmt->execute($db, [2, undef]));
+Test($stmt->execute($db, [3, 'Andreas König']));
+Test($stmt->execute($db, [4, undef]));
+
+Test($stmt = MyStatement->new("SELECT * FROM nulls WHERE name IS NULL",
+			      $parser));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [[2, undef], [4, undef]]));
+
+Test($stmt = MyStatement->new("SELECT * FROM nulls WHERE name IS NOT NULL",
+			      $parser));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [[1, 'Tim Bunce'], [3, 'Andreas König']]));
+
+
+print "DISTINCT stuff ...\n";
+Test($stmt = MyStatement->new("CREATE TABLE cars (id INTEGER, company VARCHAR(64), type VARCHAR(64), color VARCHAR(64))", $parser));
+Test($stmt->execute($db));
+Test($stmt = MyStatement->new("INSERT INTO cars VALUES (?, ?, ?, ?)", $parser));
+Test($stmt->execute($db, [1, "Mercedes", "C-Klasse", "silver"]));
+Test($stmt->execute($db, [2, "BMW", "316i", "white"]));
+Test($stmt->execute($db, [3, "Ford", "Escort XR3i", "blue"]));
+Test($stmt->execute($db, [4, "Ford", "Mondeo XR3i", "red"]));
+Test($stmt->execute($db, [5, "Mercedes", "E-Klasse", "silver"]));
+Test($stmt = MyStatement->new("SELECT company, color FROM cars"));
+Test(!$stmt->distinct());
+Test($stmt = MyStatement->new("SELECT DISTINCT company, color FROM cars ORDER BY company", $parser));
+Test($stmt->distinct());
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'},
+	   [["BMW", "white"],
+	    ["Ford", "blue"],
+	    ["Ford", "red"],
+	    ["Mercedes", "silver"]]));
+

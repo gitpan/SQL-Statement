@@ -494,6 +494,19 @@ comparison_condition:
       printf("IS operator: %d AND %d -> %d\n", $1, $3, $$);
 #endif
     }
+  | row_constructor IS NOT NULLVAL
+    { sql_op_t o;
+      o.arg1 = $1;
+      o.opNum = SQL_STATEMENT_OPERATOR_IS;
+      o.arg2 = $4;
+      o.neg = 1;
+      if (($$ = _AllocOp(stmt, &o)) == -1) {
+	  YYABORT;
+      }
+#ifdef YYDEBUG
+      printf("IS NOT operator: %d AND %d -> %d\n", $1, $4, $$);
+#endif
+    }
 ;
 
 /* \*  Not yet implemented */
