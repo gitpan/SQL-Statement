@@ -326,7 +326,6 @@ static AV* str2array(SV* sv) {
     char* ptr = SvPV(sv, len);
     char* dptr;
     STRLEN i = 0, j;
-    I32 numCols = 0;
     SV* col;
 
     if (!sv  ||  !SvOK(sv)) {

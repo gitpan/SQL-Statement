@@ -1,3 +1,9 @@
+1998-10-26  Jochen Wiedmann  <joe@ispsoft.de> (0.1009)
+
+	* lib/SQL/Statement.pm (SELECT): lockMode was set to 1, thus
+	  write permissions have been required for a SELECT. Thanks
+	  to Jason Burns <jason@3ws.com> for pointing this out.
+
 1998-09-08  Jochen Wiedmann  <joe@ispsoft.de> (0.1008)
 
 	* sql_yacc.y: Fixed typo in the lexer: ALL was returned instead of

@@ -1,6 +1,7 @@
 #include "sql_data.h"
 #include "sql_yacc.h"
 #include <stdlib.h>
+#include <ctype.h>
 
 
 sql_parser_t ansiParser = {

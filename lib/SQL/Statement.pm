@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1008';
+$VERSION = '0.1009';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -170,7 +170,7 @@ sub DELETE ($$$) {
 
 sub SELECT ($$) {
     my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 0, 1);
+    my($eval) = $self->open_tables($data, 0, 0);
     $eval->params($params);
     $self->verify_columns($eval, $data);
     my($numFields) = 0;
