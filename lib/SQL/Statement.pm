@@ -29,7 +29,7 @@ BEGIN {
 
 #use locale;
 
-$VERSION = '1.07';
+$VERSION = '1.08';
 
 $dlm = '~';
 $arg_num=0;
@@ -667,7 +667,7 @@ sub SELECT ($$) {
     my($self, $data, $params) = @_;
     $self->{"params"} ||= $params;
     my($eval,$all_cols,$tableName,$table);
-    if (defined $self->{"join"}) {
+    if (defined $self->{"join"} ) {
         return $self->JOIN($data,$params) if !defined $self->{"join"}->{"table"};
         $tableName = $dlm . 'tmp';
         $table     = $self->{"join"}->{"table"};

@@ -17,7 +17,7 @@ use constant FUNCTION_NAMES => join '|', qw(
     TRIM SUBSTRING UPPER LOWER TO_CHAR
 );
 
-$VERSION = '1.07';
+$VERSION = '1.08';
 
 BEGIN { if( $ENV{SQL_USER_DEFS} ) { require SQL::UserDefs; } }
 
@@ -86,16 +86,17 @@ sub parse {
     }
     $com = uc $com;
     if ($self->{"opts"}->{"valid_commands"}->{$com}) {
+        #print "<$sql>\n";
         my $rv = $self->$com($sql);
         delete $self->{"struct"}->{"literals"};
 #        return $self->do_err("No table names found!")
 #               unless $self->{"struct"}->{"table_names"};
         return $self->do_err("No command found!")
                unless $self->{"struct"}->{"command"};
-        if ( $self->{"struct"}->{"join"}
-         and scalar keys %{$self->{"struct"}->{"join"}}==0
+        if ( $self->{"struct"}->{join}
+         and scalar keys %{$self->{"struct"}->{join}}==0
          ) {
-            delete $self->{"struct"}->{"join"};
+            delete $self->{"struct"}->{join};
 	}
         $self->replace_quoted_ids();
 #print "<@{$self->{struct}->{table_names}}>";
@@ -132,6 +133,9 @@ $self->{struct}->{column_names} = \@uCols unless $com eq 'CREATE';
 #print Dumper $self->{struct}->{join};
 #exit;
 	}
+        delete $self->{struct}->{join}
+               if $self->{struct}->{join}
+              and scalar keys %{$self->{struct}->{join}}==0;
         return $rv;
     } 
     else {
@@ -348,13 +352,13 @@ sub SELECT {
     if ($limit_clause) {
         return undef unless $self->LIMIT_CLAUSE($limit_clause);
     }
-    if ( ( $self->{"struct"}->{"join"}->{"clause"}
-           and $self->{"struct"}->{"join"}->{"clause"} eq 'ON'
+    if ( ( $self->{"struct"}->{join}->{"clause"}
+           and $self->{"struct"}->{join}->{"clause"} eq 'ON'
          )
       or ( $self->{"struct"}->{"multiple_tables"}
 ###new
-            and !(scalar keys %{$self->{"struct"}->{"join"}})
-#            and !$self->{"struct"}->{"join"}
+            and !(scalar keys %{$self->{"struct"}->{join}})
+#            and !$self->{"struct"}->{join}
 ###
        ) ) {
            return undef unless $self->IMPLICIT_JOIN();
@@ -365,17 +369,17 @@ sub SELECT {
 sub IMPLICIT_JOIN {
     my $self = shift;
     delete $self->{"struct"}->{"multiple_tables"};
-    if ( !$self->{"struct"}->{"join"}->{"clause"}
-           or $self->{"struct"}->{"join"}->{"clause"} ne 'ON'
+    if ( !$self->{"struct"}->{join}->{"clause"}
+           or $self->{"struct"}->{join}->{"clause"} ne 'ON'
     ) {
-        $self->{"struct"}->{"join"}->{"type"}    = 'INNER';
-        $self->{"struct"}->{"join"}->{"clause"}  = 'IMPLICIT';
+        $self->{"struct"}->{join}->{"type"}    = 'INNER';
+        $self->{"struct"}->{join}->{"clause"}  = 'IMPLICIT';
     }
     if (defined $self->{"struct"}->{"keycols"} ) {
         my @keys;
         my @keys2 = @keys = @{ $self->{"struct"}->{"keycols"} };
-        $self->{"struct"}->{"join"}->{"table_order"} = $self->order_joins(\@keys2);
-        @{$self->{"struct"}->{"join"}->{"keycols"}} = @keys;
+        $self->{"struct"}->{join}->{"table_order"} = $self->order_joins(\@keys2);
+        @{$self->{"struct"}->{join}->{"keycols"}} = @keys;
         delete $self->{"struct"}->{"keycols"};
     }
     else {
@@ -397,38 +401,38 @@ sub EXPLICIT_JOIN {
         ($tableA,$remainder) = $remainder =~ /^(\S+) (.*)/;
     }
         if ( $remainder =~ /^NATURAL (.+)/) {
-            $self->{"struct"}->{"join"}->{"clause"} = 'NATURAL';
+            $self->{"struct"}->{join}->{"clause"} = 'NATURAL';
             $natural++;
             $remainder = $1;
         }
         if ( $remainder =~ 
            /^(INNER|LEFT|RIGHT|FULL|UNION) JOIN (.+)/
         ) {
-          $jtype = $self->{"struct"}->{"join"}->{"clause"} = $1;
+          $jtype = $self->{"struct"}->{join}->{"clause"} = $1;
           $remainder = $2;
           $jtype = "$jtype OUTER" if $jtype !~ /INNER|UNION/;
       }
         if ( $remainder =~ 
            /^(LEFT|RIGHT|FULL) OUTER JOIN (.+)/
         ) {
-          $jtype = $self->{"struct"}->{"join"}->{"clause"} = $1 . " OUTER";
+          $jtype = $self->{"struct"}->{join}->{"clause"} = $1 . " OUTER";
           $remainder = $2;
       }
       if ( $remainder =~ /^JOIN (.+)/) {
           $jtype = 'INNER';
-          $self->{"struct"}->{"join"}->{"clause"} = 'DEFAULT INNER';
+          $self->{"struct"}->{join}->{"clause"} = 'DEFAULT INNER';
           $remainder = $1;
       }
-      if ( $self->{"struct"}->{"join"} ) {
+      if ( $self->{"struct"}->{join} ) {
           if ( $remainder && $remainder =~ /^(.+?) USING \(([^\)]+)\)(.*)/) {
-              $self->{"struct"}->{"join"}->{"clause"} = 'USING';
+              $self->{"struct"}->{join}->{"clause"} = 'USING';
               $tableB = $1;
               my $keycolstr = $2;
               $remainder = $3;
               @$keycols = split /,/,$keycolstr;
           }
           if ( $remainder && $remainder =~ /^(.+?) ON (.+)/) {
-              $self->{"struct"}->{"join"}->{"clause"} = 'ON';
+              $self->{"struct"}->{join}->{"clause"} = 'ON';
               $tableB = $1;
 #zzz
 #print "here";
@@ -490,8 +494,8 @@ return undef unless $self->TABLE_NAME_LIST($tableA.','.$tableB);
               );
 	  }
           return undef unless $self->TABLE_NAME_LIST("$tableA,$tableB");
-          $self->{"struct"}->{"join"}->{"type"}    = $jtype;
-          $self->{"struct"}->{"join"}->{"keycols"} = $keycols if $keycols;
+          $self->{"struct"}->{join}->{"type"}    = $jtype;
+          $self->{"struct"}->{join}->{"keycols"} = $keycols if $keycols;
           return 1;
       }
       return $self->do_err("Couldn't parse explicit JOIN!");
@@ -1700,7 +1704,7 @@ sub set_feature_flags {
     if (defined $select) {
         delete $self->{"select"};
         $self->{"opts"}->{"valid_options"}->{"SELECT_MULTIPLE_TABLES"} =
-            $self->{"opts"}->{"select"}->{"join"} =  $select->{"join"};
+            $self->{"opts"}->{"select"}->{join} =  $select->{join};
     }
     if (defined $create) {
         delete $self->{"create"};

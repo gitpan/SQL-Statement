@@ -1,5 +1,11 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.08, released 20 April, 2004
+-------------------------------------
+
+ * fixed bug in JOIN handling introduced in 1.06
+
+
 Version 1.07, released 20 April, 2004
 -------------------------------------
 
