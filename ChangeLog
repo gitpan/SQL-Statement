@@ -1,3 +1,12 @@
+1998-07-22  Jochen Wiedmann  <joe@laptop.ispsoft.de>
+
+	* sql_yacc.y: Added -DMSDOS under WIN32, so that malloc.h
+	  gets included.
+	* lib/SQL/Statement.pm (UPDATE): Fixed $val->Num() to
+	  $val->num(). My thanks to Gerald Richter, <richter@ecos.de>.
+	* sql_yacc.y: Replaced isalnum with isalnum_, as isalnum('_') = 0.
+	  Pointed out by Gerald Richter, <richter@ecos.de>.
+
 1998-06-25  Jochen Wiedmann  <joe@ispsoft.de> (0.1003)
 
 	* lib/SQL/Statement.pm: Fixed bug in "ORDER BY" with numeric

@@ -158,6 +158,7 @@ typedef struct sql_stmt_s {
     char* query;
     int queryLen;
     char* queryPtr;
+    char* errPtr;
     sql_array_t values;
     sql_array_t columns;
     sql_array_t tables;

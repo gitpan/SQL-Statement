@@ -9,8 +9,14 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(WIN32)
+#define MSDOS		/* This symbol is used in bison generated code  */
+#endif
+
 #define FEATURE(a,b) (((sql_stmt_t*) stmt)->parser->a.b)
 #define YFEATURE(a,b) if (!FEATURE(a,b)) { YYABORT; }
+
+#define isalnum_(c) (isalnum(c) || c == '_')
 
 %}
 
@@ -580,7 +586,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
     while (queryEnd > queryPtr  &&  isspace(*queryPtr)) {
         ++queryPtr;
     }
-    stmt->queryPtr = queryPtr;
+    stmt->queryPtr = stmt->errPtr = queryPtr;
     if (queryPtr == queryEnd) {
         return EOF;
     }
@@ -747,21 +753,21 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'l'  ||  queryPtr[1] == 'L')  &&
 		(queryPtr[2] == 'l'  ||  queryPtr[2] == 'L')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return ALL;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 'd'  ||  queryPtr[2] == 'D')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return AND;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 's'  ||  queryPtr[1] == 'S')  &&
 		(queryPtr[2] == 'c'  ||  queryPtr[2] == 'C')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return ALL;
 	    }
@@ -770,7 +776,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'B':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 'y'  ||  queryPtr[1] == 'Y')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return BY;
 	    }
@@ -779,7 +785,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'l'  ||  queryPtr[1] == 'L')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'b'  ||  queryPtr[3] == 'B')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return BLOB;
 	    }
@@ -792,7 +798,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'a'  ||  queryPtr[3] == 'A')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return CREATE;
 	    }
@@ -800,7 +806,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'h'  ||  queryPtr[1] == 'H')  &&
 		(queryPtr[2] == 'a'  ||  queryPtr[2] == 'A')  &&
 		(queryPtr[3] == 'r'  ||  queryPtr[3] == 'R')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return CHAR;
 	    }
@@ -811,7 +817,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 's'  ||  queryPtr[2] == 'S')  &&
 		(queryPtr[3] == 'c'  ||  queryPtr[3] == 'C')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return DESC;
 	    }
@@ -819,7 +825,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'p'  ||  queryPtr[3] == 'P')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return DROP;
 	    }
@@ -829,7 +835,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return DELETE;
 	    }
@@ -841,7 +847,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[5] == 'n'  ||  queryPtr[5] == 'N')  &&
 		(queryPtr[6] == 'c'  ||  queryPtr[6] == 'C')  &&
 		(queryPtr[7] == 't'  ||  queryPtr[7] == 'T')  &&
-		(queryPtr+8 == queryEnd  || !isalnum(queryPtr[8]))) {
+		(queryPtr+8 == queryEnd  || !isalnum_(queryPtr[8]))) {
 	        stmt->queryPtr = queryPtr + 8;
 		return DISTINCT;
 	    }
@@ -852,7 +858,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'm'  ||  queryPtr[3] == 'M')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return FROM;
 	    }
@@ -861,7 +867,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'I':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 's'  ||  queryPtr[1] == 'S')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return IS;
 	    }
@@ -869,7 +875,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
 		(queryPtr[3] == 'o'  ||  queryPtr[3] == 'O')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return INTO;
 	    }
@@ -879,14 +885,14 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'r'  ||  queryPtr[4] == 'R')  &&
 		(queryPtr[5] == 't'  ||  queryPtr[5] == 'T')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return INSERT;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return INTEGER;
 	    }
@@ -897,7 +903,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'g'  ||  queryPtr[4] == 'G')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
 		(queryPtr[6] == 'r'  ||  queryPtr[6] == 'R')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return INTEGER;
 	    }
@@ -907,7 +913,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'y'  ||  queryPtr[2] == 'Y')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return KEY;
 	    }
@@ -918,7 +924,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'i'  ||  queryPtr[1] == 'I')  &&
 		(queryPtr[2] == 'k'  ||  queryPtr[2] == 'K')  &&
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		lvalp->operator = SQL_STATEMENT_OPERATOR_LIKE;
 		return OPERATOR;
@@ -929,7 +935,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'o'  ||  queryPtr[1] == 'O')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return NOT;
 	    }
@@ -937,7 +943,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'u'  ||  queryPtr[1] == 'U')  &&
 		(queryPtr[2] == 'l'  ||  queryPtr[2] == 'L')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return NULLVAL;
 	    }
@@ -946,7 +952,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'O':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return OR;
 	    }
@@ -955,7 +961,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'd'  ||  queryPtr[2] == 'D')  &&
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'r'  ||  queryPtr[4] == 'R')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 	        stmt->queryPtr = queryPtr + 5;
 		return ORDER;
 	    }
@@ -969,7 +975,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'a'  ||  queryPtr[4] == 'A')  &&
 		(queryPtr[5] == 'r'  ||  queryPtr[5] == 'R')  &&
 		(queryPtr[6] == 'y'  ||  queryPtr[6] == 'Y')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return PRIMARY;
 	    }
@@ -981,7 +987,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'a'  ||  queryPtr[2] == 'A')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return REAL;
 	    }
@@ -991,7 +997,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return SET;
 	    }
@@ -1001,7 +1007,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'c'  ||  queryPtr[4] == 'C')  &&
 		(queryPtr[5] == 't'  ||  queryPtr[5] == 'T')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return SELECT;
 	    }
@@ -1013,7 +1019,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'b'  ||  queryPtr[2] == 'B')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 	        stmt->queryPtr = queryPtr + 5;
 		return TABLE;
 	    }
@@ -1022,7 +1028,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'x'  ||  queryPtr[2] == 'X')  &&
 		(queryPtr[3] == 't'  ||  queryPtr[3] == 'T')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return TEXT;
 	    }
@@ -1035,7 +1041,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'a'  ||  queryPtr[3] == 'A')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return UPDATE;
 	    }
@@ -1047,7 +1053,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'u'  ||  queryPtr[3] == 'U')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
 		(queryPtr[5] == 's'  ||  queryPtr[5] == 'S')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return VALUES;
 	    }
@@ -1058,7 +1064,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'h'  ||  queryPtr[4] == 'H')  &&
 		(queryPtr[5] == 'a'  ||  queryPtr[5] == 'A')  &&
 		(queryPtr[6] == 'r'  ||  queryPtr[6] == 'R')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return VARCHAR;
 	    }
@@ -1070,7 +1076,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'e'  ||  queryPtr[2] == 'E')  &&
 		(queryPtr[3] == 'r'  ||  queryPtr[3] == 'R')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 
 	        stmt->queryPtr = queryPtr + 5;
 		return WHERE;
@@ -1078,7 +1084,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    break;
 	}
 
-	while (queryPtr < queryEnd  &&  isalnum(*queryPtr)) {
+	while (queryPtr < queryEnd  &&  isalnum_(*queryPtr)) {
 	  ++queryPtr;
 	}
 	lvalp->ident_val.ptr = stmt->queryPtr;
@@ -1251,6 +1257,7 @@ int SQL_Statement_Prepare(sql_stmt_t* stmt, char* query,
 		       int queryLen) {
     if (!query) {
         stmt->errMsg = SQL_STATEMENT_ERROR_PARSE;
+	stmt->errPtr = "";
 	return 0;
     }
     _InitArray(&stmt->values, sizeof(sql_val_t));
@@ -1262,11 +1269,12 @@ int SQL_Statement_Prepare(sql_stmt_t* stmt, char* query,
     stmt->command = -1;
     stmt->query = query;
     stmt->queryLen = queryLen;
-    stmt->queryPtr = query;
+    stmt->queryPtr = stmt->errPtr = query;
     stmt->errMsg = 0;
 #ifdef YYDEBUG
     yydebug = 1;
 #endif
+
     if (yyparse(stmt)  ||  stmt->errMsg  ||  stmt->command == -1) {
         if (!stmt->errMsg) {
 	    stmt->errMsg = SQL_STATEMENT_ERROR_PARSE;

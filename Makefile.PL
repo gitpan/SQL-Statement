@@ -11,6 +11,9 @@ my($defines) = '';
 if ($ENV{'USER'} eq 'joe'  &&  $ENV{'HOSTNAME'} eq 'laptop.ispsoft.de') {
     $defines = '-Wall -Wstrict-prototypes';
 }
+if ($^O =~ /win/i) {
+    $defines .= " -Dalloca=_alloca";
+}
 ExtUtils::MakeMaker::WriteMakefile(
     'NAME' => 'SQL::Statement',
     'VERSION_FROM' => 'lib/SQL/Statement.pm',

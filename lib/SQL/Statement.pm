@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1003';
+$VERSION = '0.1004';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -128,7 +128,7 @@ sub UPDATE ($$$) {
 		$col = $self->columns($i);
 		$val = $self->row_values($i);
 		if (ref($val) eq 'SQL::Statement::Param') {
-		    $val = $eval->params($val->Num());
+		    $val = $eval->params($val->num());
 		}
 		$array->[$table->column_num($col->name())] = $val;
 	    }

@@ -258,8 +258,11 @@ new(self, statement, parser=NULL)
 	}
 	if (!SQL_Statement_Prepare(stmt, query, len)) {
 	    int errMsg = stmt->errMsg;
-	    free(stmt);
-	    croak(SQL_Statement_Error(errMsg));
+	    if (errMsg != SQL_STATEMENT_ERROR_PARSE) {
+	        free(stmt);
+		croak(SQL_Statement_Error(errMsg));
+	    }
+	    croak("Parse error near %s", stmt->errPtr);
 	}
 
 	hv = newHV();

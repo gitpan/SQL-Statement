@@ -53,11 +53,17 @@
 #include <string.h>
 #include <ctype.h>
 
+#if defined(WIN32)
+#define MSDOS		/* This symbol is used in bison generated code  */
+#endif
+
 #define FEATURE(a,b) (((sql_stmt_t*) stmt)->parser->a.b)
 #define YFEATURE(a,b) if (!FEATURE(a,b)) { YYABORT; }
 
+#define isalnum_(c) (isalnum(c) || c == '_')
 
-#line 17 "sql_yacc.y"
+
+#line 23 "sql_yacc.y"
 typedef union {
     int scalar_val;
     int bool_val;
@@ -71,7 +77,7 @@ typedef union {
     int operator;
     int null_val;
 } YYSTYPE;
-#line 31 "sql_yacc.y"
+#line 37 "sql_yacc.y"
 
 
 #define YYPARSE_PARAM stmt
@@ -190,15 +196,15 @@ static const short yyrhs[] = {    53,
 
 #if YYDEBUG != 0
 static const short yyrline[] = { 0,
-   130,   132,   133,   134,   135,   136,   139,   146,   153,   155,
-   158,   160,   161,   162,   164,   166,   170,   172,   175,   177,
-   178,   181,   183,   186,   194,   196,   199,   201,   204,   209,
-   213,   219,   227,   234,   241,   251,   262,   264,   267,   269,
-   272,   274,   277,   287,   289,   290,   293,   295,   298,   306,
-   321,   327,   334,   336,   340,   348,   361,   363,   366,   381,
-   388,   395,   402,   404,   419,   421,   436,   438,   449,   451,
-   454,   464,   478,   516,   518,   521,   523,   524,   525,   526,
-   529,   548
+   136,   138,   139,   140,   141,   142,   145,   152,   159,   161,
+   164,   166,   167,   168,   170,   172,   176,   178,   181,   183,
+   184,   187,   189,   192,   200,   202,   205,   207,   210,   215,
+   219,   225,   233,   240,   247,   257,   268,   270,   273,   275,
+   278,   280,   283,   293,   295,   296,   299,   301,   304,   312,
+   327,   333,   340,   342,   346,   354,   367,   369,   372,   387,
+   394,   401,   408,   410,   425,   427,   442,   444,   455,   457,
+   460,   470,   484,   522,   524,   527,   529,   530,   531,   532,
+   535,   554
 };
 #endif
 
@@ -841,81 +847,81 @@ yyreduce:
   switch (yyn) {
 
 case 7:
-#line 141 "sql_yacc.y"
+#line 147 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_DROP;
       ((sql_stmt_t*) stmt)->hasResult = 0;
     ;
     break;}
 case 8:
-#line 148 "sql_yacc.y"
+#line 154 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_CREATE;
       ((sql_stmt_t*) stmt)->hasResult = 0;
     ;
     break;}
 case 10:
-#line 155 "sql_yacc.y"
+#line 161 "sql_yacc.y"
 { yyval.scalar_val = yyvsp[0].scalar_val ;
     break;}
 case 14:
-#line 163 "sql_yacc.y"
+#line 169 "sql_yacc.y"
 { YFEATURE(create, type_real); ;
     break;}
 case 15:
-#line 165 "sql_yacc.y"
+#line 171 "sql_yacc.y"
 { YFEATURE(create, type_blob); ;
     break;}
 case 16:
-#line 167 "sql_yacc.y"
+#line 173 "sql_yacc.y"
 { YFEATURE(create, type_text); ;
     break;}
 case 23:
-#line 183 "sql_yacc.y"
+#line 189 "sql_yacc.y"
 { yyval.ident_val = yyvsp[0].ident_val ;
     break;}
 case 24:
-#line 189 "sql_yacc.y"
+#line 195 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_SELECT;
       ((sql_stmt_t*) stmt)->hasResult = 1;
     ;
     break;}
 case 29:
-#line 206 "sql_yacc.y"
+#line 212 "sql_yacc.y"
 { sql_order_t o; o.desc = 0; o.col = yyvsp[0].scalar_val;
       if ((yyval.scalar_val = _AllocOrderRow(stmt, &o))  ==  -1) { YYABORT; }
     ;
     break;}
 case 30:
-#line 210 "sql_yacc.y"
+#line 216 "sql_yacc.y"
 { sql_order_t o; o.desc = 0; o.col = yyvsp[-1].scalar_val;
       if ((yyval.scalar_val = _AllocOrderRow(stmt, &o))  ==  -1) { YYABORT; }
     ;
     break;}
 case 31:
-#line 214 "sql_yacc.y"
+#line 220 "sql_yacc.y"
 { sql_order_t o; o.desc = 1; o.col = yyvsp[-1].scalar_val;
       if ((yyval.scalar_val = _AllocOrderRow(stmt, &o))  ==  -1) { YYABORT; }
     ;
     break;}
 case 32:
-#line 222 "sql_yacc.y"
+#line 228 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_INSERT;
       ((sql_stmt_t*) stmt)->hasResult = 0;
     ;
     break;}
 case 33:
-#line 229 "sql_yacc.y"
+#line 235 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_UPDATE;
       ((sql_stmt_t*) stmt)->hasResult = 0;
     ;
     break;}
 case 34:
-#line 236 "sql_yacc.y"
+#line 242 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_DELETE;
       ((sql_stmt_t*) stmt)->hasResult = 0;
     ;
     break;}
 case 35:
-#line 243 "sql_yacc.y"
+#line 249 "sql_yacc.y"
 { sql_rowval_list_t rowVal;
       sql_column_list_t column;
       if (yyvsp[-1].operator != SQL_STATEMENT_OPERATOR_EQ) { YYABORT; }
@@ -926,7 +932,7 @@ case 35:
     ;
     break;}
 case 36:
-#line 252 "sql_yacc.y"
+#line 258 "sql_yacc.y"
 { sql_rowval_list_t rowVal;
       sql_column_list_t column;
       if (yyvsp[-1].operator != SQL_STATEMENT_OPERATOR_EQ) { YYABORT; }
@@ -937,15 +943,15 @@ case 36:
     ;
     break;}
 case 40:
-#line 269 "sql_yacc.y"
+#line 275 "sql_yacc.y"
 { yyval.scalar_val = yyvsp[0].scalar_val ;
     break;}
 case 42:
-#line 274 "sql_yacc.y"
+#line 280 "sql_yacc.y"
 { yyval.scalar_val = yyvsp[0].scalar_val ;
     break;}
 case 43:
-#line 279 "sql_yacc.y"
+#line 285 "sql_yacc.y"
 { sql_rowval_list_t rowVal;
       rowVal.val = yyvsp[0].scalar_val;
       if ((yyval.scalar_val = _AllocRowValList(stmt, &rowVal)) == -1) {
@@ -954,19 +960,19 @@ case 43:
     ;
     break;}
 case 44:
-#line 288 "sql_yacc.y"
+#line 294 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->distinct = 0; ;
     break;}
 case 45:
-#line 289 "sql_yacc.y"
+#line 295 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->distinct = 0; ;
     break;}
 case 46:
-#line 290 "sql_yacc.y"
+#line 296 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->distinct = 1; ;
     break;}
 case 49:
-#line 300 "sql_yacc.y"
+#line 306 "sql_yacc.y"
 { sql_column_list_t column;
       column.column = yyvsp[-1].scalar_val;
       if ((yyval.column = _AllocColumnList(stmt, &column)) == -1) {
@@ -975,7 +981,7 @@ case 49:
     ;
     break;}
 case 50:
-#line 307 "sql_yacc.y"
+#line 313 "sql_yacc.y"
 { sql_column_t col;
       sql_column_list_t column;
 
@@ -990,11 +996,11 @@ case 50:
     ;
     break;}
 case 54:
-#line 337 "sql_yacc.y"
+#line 343 "sql_yacc.y"
 { YFEATURE(select, join); ;
     break;}
 case 56:
-#line 349 "sql_yacc.y"
+#line 355 "sql_yacc.y"
 { sql_table_t table;
           sql_table_list_t tl;
 	  table.table = yyvsp[0].ident_val;
@@ -1007,15 +1013,15 @@ case 56:
 	;
     break;}
 case 57:
-#line 362 "sql_yacc.y"
+#line 368 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->where = -1; ;
     break;}
 case 58:
-#line 363 "sql_yacc.y"
+#line 369 "sql_yacc.y"
 { ((sql_stmt_t*) stmt)->where = yyvsp[0].bool_val; ;
     break;}
 case 64:
-#line 405 "sql_yacc.y"
+#line 411 "sql_yacc.y"
 { sql_op_t o;
       o.arg1 = yyvsp[-2].bool_val;
       o.opNum = SQL_STATEMENT_OPERATOR_OR;
@@ -1030,7 +1036,7 @@ case 64:
     ;
     break;}
 case 66:
-#line 422 "sql_yacc.y"
+#line 428 "sql_yacc.y"
 { sql_op_t o;
       o.arg1 = yyvsp[-2].bool_val;
       o.opNum = SQL_STATEMENT_OPERATOR_AND;
@@ -1045,7 +1051,7 @@ case 66:
     ;
     break;}
 case 68:
-#line 439 "sql_yacc.y"
+#line 445 "sql_yacc.y"
 { sql_val_t* o = ((sql_val_t*) ((sql_stmt_t*) stmt)->values.data)+yyvsp[0].bool_val;
       if (o->type != SQL_STATEMENT_TYPE_OP) {
 	  ((sql_stmt_t*) stmt)->errMsg = SQL_STATEMENT_ERROR_INTERNAL;
@@ -1056,11 +1062,11 @@ case 68:
     ;
     break;}
 case 70:
-#line 451 "sql_yacc.y"
+#line 457 "sql_yacc.y"
 { yyval.bool_val = yyvsp[-1].bool_val ;
     break;}
 case 72:
-#line 466 "sql_yacc.y"
+#line 472 "sql_yacc.y"
 { sql_op_t o;
       o.arg1 = yyvsp[-2].scalar_val;
       o.opNum = yyvsp[-1].operator;
@@ -1075,7 +1081,7 @@ case 72:
     ;
     break;}
 case 73:
-#line 479 "sql_yacc.y"
+#line 485 "sql_yacc.y"
 { sql_op_t o;
       o.arg1 = yyvsp[-2].scalar_val;
       o.opNum = SQL_STATEMENT_OPERATOR_IS;
@@ -1090,27 +1096,27 @@ case 73:
     ;
     break;}
 case 76:
-#line 522 "sql_yacc.y"
+#line 528 "sql_yacc.y"
 { if ((yyval.scalar_val = _AllocInteger(stmt, yyvsp[0].int_val)) == -1) { YYABORT; } ;
     break;}
 case 77:
-#line 523 "sql_yacc.y"
+#line 529 "sql_yacc.y"
 { if ((yyval.scalar_val = _AllocReal(stmt, yyvsp[0].real_val)) == -1) { YYABORT; } ;
     break;}
 case 78:
-#line 524 "sql_yacc.y"
+#line 530 "sql_yacc.y"
 { if ((yyval.scalar_val = _AllocString(stmt, &yyvsp[0].string_val)) == -1) { YYABORT; } ;
     break;}
 case 79:
-#line 525 "sql_yacc.y"
+#line 531 "sql_yacc.y"
 { yyval.scalar_val = yyvsp[0].null_val; ;
     break;}
 case 80:
-#line 526 "sql_yacc.y"
+#line 532 "sql_yacc.y"
 { if ((yyval.scalar_val = _AllocParam(stmt, &yyvsp[0].param)) == -1) { YYABORT; } ;
     break;}
 case 81:
-#line 531 "sql_yacc.y"
+#line 537 "sql_yacc.y"
 { sql_column_t col;
       sql_table_list_t* tl;
       sql_val_t* val;
@@ -1126,7 +1132,7 @@ case 81:
     ;
     break;}
 case 82:
-#line 550 "sql_yacc.y"
+#line 556 "sql_yacc.y"
 { sql_column_list_t column;
       column.column = yyvsp[0].scalar_val;
       if ((yyval.scalar_val = _AllocColumnList(stmt, &column)) == -1) {
@@ -1332,7 +1338,7 @@ yyerrhandle:
   yystate = yyn;
   goto yynewstate;
 }
-#line 557 "sql_yacc.y"
+#line 563 "sql_yacc.y"
 
 
 
@@ -1359,7 +1365,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
     while (queryEnd > queryPtr  &&  isspace(*queryPtr)) {
         ++queryPtr;
     }
-    stmt->queryPtr = queryPtr;
+    stmt->queryPtr = stmt->errPtr = queryPtr;
     if (queryPtr == queryEnd) {
         return EOF;
     }
@@ -1526,21 +1532,21 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'l'  ||  queryPtr[1] == 'L')  &&
 		(queryPtr[2] == 'l'  ||  queryPtr[2] == 'L')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return ALL;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 'd'  ||  queryPtr[2] == 'D')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return AND;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 's'  ||  queryPtr[1] == 'S')  &&
 		(queryPtr[2] == 'c'  ||  queryPtr[2] == 'C')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return ALL;
 	    }
@@ -1549,7 +1555,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'B':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 'y'  ||  queryPtr[1] == 'Y')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return BY;
 	    }
@@ -1558,7 +1564,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'l'  ||  queryPtr[1] == 'L')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'b'  ||  queryPtr[3] == 'B')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return BLOB;
 	    }
@@ -1571,7 +1577,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'a'  ||  queryPtr[3] == 'A')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return CREATE;
 	    }
@@ -1579,7 +1585,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'h'  ||  queryPtr[1] == 'H')  &&
 		(queryPtr[2] == 'a'  ||  queryPtr[2] == 'A')  &&
 		(queryPtr[3] == 'r'  ||  queryPtr[3] == 'R')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return CHAR;
 	    }
@@ -1590,7 +1596,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 's'  ||  queryPtr[2] == 'S')  &&
 		(queryPtr[3] == 'c'  ||  queryPtr[3] == 'C')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return DESC;
 	    }
@@ -1598,7 +1604,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'p'  ||  queryPtr[3] == 'P')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return DROP;
 	    }
@@ -1608,7 +1614,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return DELETE;
 	    }
@@ -1620,7 +1626,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[5] == 'n'  ||  queryPtr[5] == 'N')  &&
 		(queryPtr[6] == 'c'  ||  queryPtr[6] == 'C')  &&
 		(queryPtr[7] == 't'  ||  queryPtr[7] == 'T')  &&
-		(queryPtr+8 == queryEnd  || !isalnum(queryPtr[8]))) {
+		(queryPtr+8 == queryEnd  || !isalnum_(queryPtr[8]))) {
 	        stmt->queryPtr = queryPtr + 8;
 		return DISTINCT;
 	    }
@@ -1631,7 +1637,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
 		(queryPtr[2] == 'o'  ||  queryPtr[2] == 'O')  &&
 		(queryPtr[3] == 'm'  ||  queryPtr[3] == 'M')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return FROM;
 	    }
@@ -1640,7 +1646,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'I':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 's'  ||  queryPtr[1] == 'S')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return IS;
 	    }
@@ -1648,7 +1654,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
 		(queryPtr[3] == 'o'  ||  queryPtr[3] == 'O')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return INTO;
 	    }
@@ -1658,14 +1664,14 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'r'  ||  queryPtr[4] == 'R')  &&
 		(queryPtr[5] == 't'  ||  queryPtr[5] == 'T')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return INSERT;
 	    }
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'n'  ||  queryPtr[1] == 'N')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return INTEGER;
 	    }
@@ -1676,7 +1682,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'g'  ||  queryPtr[4] == 'G')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
 		(queryPtr[6] == 'r'  ||  queryPtr[6] == 'R')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return INTEGER;
 	    }
@@ -1686,7 +1692,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'y'  ||  queryPtr[2] == 'Y')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return KEY;
 	    }
@@ -1697,7 +1703,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'i'  ||  queryPtr[1] == 'I')  &&
 		(queryPtr[2] == 'k'  ||  queryPtr[2] == 'K')  &&
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		lvalp->operator = SQL_STATEMENT_OPERATOR_LIKE;
 		return OPERATOR;
@@ -1708,7 +1714,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'o'  ||  queryPtr[1] == 'O')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return NOT;
 	    }
@@ -1716,7 +1722,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'u'  ||  queryPtr[1] == 'U')  &&
 		(queryPtr[2] == 'l'  ||  queryPtr[2] == 'L')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return NULLVAL;
 	    }
@@ -1725,7 +1731,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	  case 'O':
 	    if (queryPtr+2 <= queryEnd  &&
 		(queryPtr[1] == 'r'  ||  queryPtr[1] == 'R')  &&
-		(queryPtr+2 == queryEnd  || !isalnum(queryPtr[2]))) {
+		(queryPtr+2 == queryEnd  || !isalnum_(queryPtr[2]))) {
 	        stmt->queryPtr = queryPtr + 2;
 		return OR;
 	    }
@@ -1734,7 +1740,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'd'  ||  queryPtr[2] == 'D')  &&
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'r'  ||  queryPtr[4] == 'R')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 	        stmt->queryPtr = queryPtr + 5;
 		return ORDER;
 	    }
@@ -1748,7 +1754,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'a'  ||  queryPtr[4] == 'A')  &&
 		(queryPtr[5] == 'r'  ||  queryPtr[5] == 'R')  &&
 		(queryPtr[6] == 'y'  ||  queryPtr[6] == 'Y')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return PRIMARY;
 	    }
@@ -1760,7 +1766,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'a'  ||  queryPtr[2] == 'A')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return REAL;
 	    }
@@ -1770,7 +1776,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    if (queryPtr+3 <= queryEnd  &&
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 't'  ||  queryPtr[2] == 'T')  &&
-		(queryPtr+3 == queryEnd  || !isalnum(queryPtr[3]))) {
+		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
 		return SET;
 	    }
@@ -1780,7 +1786,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'e'  ||  queryPtr[3] == 'E')  &&
 		(queryPtr[4] == 'c'  ||  queryPtr[4] == 'C')  &&
 		(queryPtr[5] == 't'  ||  queryPtr[5] == 'T')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return SELECT;
 	    }
@@ -1792,7 +1798,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'b'  ||  queryPtr[2] == 'B')  &&
 		(queryPtr[3] == 'l'  ||  queryPtr[3] == 'L')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 	        stmt->queryPtr = queryPtr + 5;
 		return TABLE;
 	    }
@@ -1801,7 +1807,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[1] == 'e'  ||  queryPtr[1] == 'E')  &&
 		(queryPtr[2] == 'x'  ||  queryPtr[2] == 'X')  &&
 		(queryPtr[3] == 't'  ||  queryPtr[3] == 'T')  &&
-		(queryPtr+4 == queryEnd  || !isalnum(queryPtr[4]))) {
+		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return TEXT;
 	    }
@@ -1814,7 +1820,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'a'  ||  queryPtr[3] == 'A')  &&
 		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
 		(queryPtr[5] == 'e'  ||  queryPtr[5] == 'E')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return UPDATE;
 	    }
@@ -1826,7 +1832,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[3] == 'u'  ||  queryPtr[3] == 'U')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
 		(queryPtr[5] == 's'  ||  queryPtr[5] == 'S')  &&
-		(queryPtr+6 == queryEnd  || !isalnum(queryPtr[6]))) {
+		(queryPtr+6 == queryEnd  || !isalnum_(queryPtr[6]))) {
 	        stmt->queryPtr = queryPtr + 6;
 		return VALUES;
 	    }
@@ -1837,7 +1843,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[4] == 'h'  ||  queryPtr[4] == 'H')  &&
 		(queryPtr[5] == 'a'  ||  queryPtr[5] == 'A')  &&
 		(queryPtr[6] == 'r'  ||  queryPtr[6] == 'R')  &&
-		(queryPtr+7 == queryEnd  || !isalnum(queryPtr[7]))) {
+		(queryPtr+7 == queryEnd  || !isalnum_(queryPtr[7]))) {
 	        stmt->queryPtr = queryPtr + 7;
 		return VARCHAR;
 	    }
@@ -1849,7 +1855,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'e'  ||  queryPtr[2] == 'E')  &&
 		(queryPtr[3] == 'r'  ||  queryPtr[3] == 'R')  &&
 		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
-		(queryPtr+5 == queryEnd  || !isalnum(queryPtr[5]))) {
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
 
 	        stmt->queryPtr = queryPtr + 5;
 		return WHERE;
@@ -1857,7 +1863,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	    break;
 	}
 
-	while (queryPtr < queryEnd  &&  isalnum(*queryPtr)) {
+	while (queryPtr < queryEnd  &&  isalnum_(*queryPtr)) {
 	  ++queryPtr;
 	}
 	lvalp->ident_val.ptr = stmt->queryPtr;
@@ -2030,6 +2036,7 @@ int SQL_Statement_Prepare(sql_stmt_t* stmt, char* query,
 		       int queryLen) {
     if (!query) {
         stmt->errMsg = SQL_STATEMENT_ERROR_PARSE;
+	stmt->errPtr = "";
 	return 0;
     }
     _InitArray(&stmt->values, sizeof(sql_val_t));
@@ -2041,11 +2048,12 @@ int SQL_Statement_Prepare(sql_stmt_t* stmt, char* query,
     stmt->command = -1;
     stmt->query = query;
     stmt->queryLen = queryLen;
-    stmt->queryPtr = query;
+    stmt->queryPtr = stmt->errPtr = query;
     stmt->errMsg = 0;
 #ifdef YYDEBUG
     yydebug = 1;
 #endif
+
     if (yyparse(stmt)  ||  stmt->errMsg  ||  stmt->command == -1) {
         if (!stmt->errMsg) {
 	    stmt->errMsg = SQL_STATEMENT_ERROR_PARSE;
