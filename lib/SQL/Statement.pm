@@ -29,7 +29,7 @@ BEGIN {
 
 #use locale;
 
-$VERSION = '1.08';
+$VERSION = '1.09';
 
 $dlm = '~';
 $arg_num=0;

@@ -1,5 +1,10 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.09, released 22 April, 2004
+-------------------------------------
+ * fixed parens parsing bug reported by Dan Wright, thanks!
+
+
 Version 1.08, released 20 April, 2004
 -------------------------------------
 

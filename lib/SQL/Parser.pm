@@ -17,7 +17,7 @@ use constant FUNCTION_NAMES => join '|', qw(
     TRIM SUBSTRING UPPER LOWER TO_CHAR
 );
 
-$VERSION = '1.08';
+$VERSION = '1.09';
 
 BEGIN { if( $ENV{SQL_USER_DEFS} ) { require SQL::UserDefs; } }
 
@@ -991,19 +991,20 @@ sub parens_search {
     my $predicates = shift;
     my $index = scalar @$predicates;
 
-# to handle WHERE (a=b) AND (c=d)
+    # to handle WHERE (a=b) AND (c=d)
+    # but needs escape space to not foul up AND/OR
     if ($str =~ /\(([^()]+?)\)/ ) {
         my $pred = quotemeta $1;
-        if ($pred !~ / (AND|OR) / ) {
+        if ($pred !~ / (AND|OR)\\ / ) {
           $str =~ s/\(($pred)\)/$1/;
         }
     }
-#
+    #
 
     if ($str =~ s/\(([^()]+)\)/^$index^/ ) {
         push @$predicates, $1;
     }
-# patch from Chromatic
+    # patch from Chromatic
     if ($str =~ /\((?!\))/ ) {
         return $self->parens_search($str,$predicates);
     }
@@ -1031,10 +1032,11 @@ sub non_parens_search {
     $str =~ s/^\s*\^0\^\s*$/$predicates->[0]/;
     return if $str =~ /^\s*~0~\s*$/;
     if ( ($pred1, $op, $pred2) = $str =~ /^(.+) (AND|OR) (.+)$/i ) {
-    $pred1 =~ s/\~(\d+)\~$/$and_preds->[$1]/;
-    $pred2 =~ s/\~(\d+)\~$/$and_preds->[$1]/;
+        $pred1 =~ s/\~(\d+)\~$/$and_preds->[$1]/g;
+        $pred2 =~ s/\~(\d+)\~$/$and_preds->[$1]/g;
         $pred1 = $self->non_parens_search($pred1,$predicates);
         $pred2 = $self->non_parens_search($pred2,$predicates);
+        # print $op;
         return {
             neg  => $neg,
             nots => $nots,
@@ -1049,6 +1051,7 @@ sub non_parens_search {
         my($k,$v) = $xstr =~ /^(\S+?)\s+\S+\s*(.+)\s*$/;
         #print "$k,$v\n" if defined $k;
         push @{ $self->{struct}->{where_cols}->{$k}}, $v if defined $k;
+        # print " [$str] ";
         return $self->PREDICATE($str);
     }
 }
