@@ -1,5 +1,13 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.06, released 18 April, 2004
+-------------------------------------
+
+ * column and table name hashes now default to case sensitive
+
+ * where() method now supported as per the docs
+   
+
 Version 1.005, released 26 October, 2002
 ------------------------------------------
 
@@ -12,7 +20,6 @@ Version 1.005, released 26 October, 2002
 
  * fixed bug in ORDER BY (when col names not in SELECT list)
    Thanks Janet Goldstein <jgold@cidr.jhmi.edu>
-
 
 
 Version 1.004, released 13 March, 2002

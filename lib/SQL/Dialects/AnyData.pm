@@ -1,6 +1,5 @@
 package SQL::Dialects::AnyData;
 
-=pod
 
 =head1 NAME
 

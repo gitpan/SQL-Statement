@@ -11,13 +11,29 @@ package SQL::Statement;
 use strict;
 use SQL::Parser;
 use SQL::Eval;
-use vars qw($VERSION $numexp $s2pops $arg_num $dlm);
+use vars qw($VERSION $numexp $s2pops $arg_num $dlm $warg_num $HAS_DBI);
+BEGIN {
+    eval { require 'DBI.pm' };
+    $HAS_DBI = 1 unless $@;
+    *is_number = ($HAS_DBI)
+               ? *DBI::looks_like_number
+	       : sub {
+                     my @strs = @_;
+                     for my $x(@strs) {
+                         return 0 if !defined $x;
+                         return 0 if $x !~ $numexp;
+                     }
+                     return 1;
+                 };
+}
+
 #use locale;
 
-$VERSION = '1.005';
+$VERSION = '1.06';
 
 $dlm = '~';
 $arg_num=0;
+$warg_num=0;
 $s2pops = {
               'LIKE'   => {'s'=>'LIKE',n=>'LIKE'},
               'CLIKE'  => {'s'=>'CLIKE',n=>'CLIKE'},
@@ -34,6 +50,7 @@ BEGIN {
     sub qr {}
   }
 }
+
 sub new {
     my $class  = shift;
     my $sql    = shift;
@@ -78,7 +95,6 @@ sub new {
 ###endnew
         : qr/^\s*[+-]?\s*\.?\s*\d/;
     }
-#use mylibs; zwarn $self; exit;
     $self->prepare($sql,$parser);
     return $self;
 }
@@ -161,18 +177,30 @@ sub execute {
     $self->{'params'}= $params;
     my($table, $msg);
     my($command) = $self->command();
-    return DBI::set_err($self, 1, 'No command found!') unless $command;
+    return $self->do_err( 'No command found!') unless $command;
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
           $self->{'data'}) = $self->$command($data, $params);
-    my $tables;
+#=pod
     my $names = $self->{NAME};
-    @{$self->{NAME}} = map {
-        my $org = $self->{ORG_NAME}->{$_};
+    @$names = map {
+        my $org = $self->{ORG_NAME}->{$_}; # from the file header
         $org =~ s/^"//;
         $org =~ s/"$//;
         $org =~ s/""/"/g;
         $org;
-    } @$names;
+    } @$names  if $self->{asterisked_columns};
+    $names = $self->{org_col_names} unless $self->{asterisked_columns};
+
+    $self->{NAME} = $names;
+if ($command eq 'SELECT') {
+#use mylibs; zwarn $self;
+#print "\n\n";
+#print "[" . ($self->{asterisked_columns}||'') . "]";
+#print "~@$names~" if $names;
+#print "\n\n";
+    }
+#=cut
+    my $tables;
     @$tables = map {$_->{"name"}} @{ $self->{"tables"} };
     delete $self->{'tables'};  # Force closing the tables
     for (@$tables) {
@@ -181,6 +209,15 @@ sub execute {
     $self->{'NUM_OF_ROWS'} || '0E0';
 }
 
+sub CONNECT ($$$) {
+    my($self, $data, $params) = @_;
+    if ($self->can('open_connection')) {
+        my $dsn = $self->{connection}->{dsn};
+        my $tbl = $self->{connection}->{tbl};
+        return $self->open_connection($dsn,$tbl,$data,$params)
+    }
+    (0, 0);
+}
 
 sub CREATE ($$$) {
     my($self, $data, $params) = @_;
@@ -199,9 +236,7 @@ sub CREATE ($$$) {
 
 sub DROP ($$$) {
     my($self, $data, $params) = @_;
-#use mylibs; zwarn $self; exit;
     if ($self->{ignore_missing_table}) {
-         undef $@;
          eval { $self->open_tables($data,0,0) };
          if ($@ and $@ =~ /no such (table|file)/i ) {
              return (-1,0);
@@ -227,7 +262,6 @@ sub INSERT ($$$) {
     $table->seek($data, 0, 2);
     my($array) = [];
     my($val, $col, $i);
-###    my($columns) = $table->{'colNums'};
     my($cNum) = scalar($self->columns());
     my $param_num = 0;
     if ($cNum) {
@@ -237,40 +271,17 @@ sub INSERT ($$$) {
             $val = $self->row_values($i);
             if ($val and ref($val) eq 'SQL::Statement::Param') {
                 $val = $eval->param($val->num());
-            }
-            elsif ($val and $val->{type} eq 'placeholder') {
+          }
+          elsif ($val and $val->{type} eq 'placeholder') {
                 $val = $eval->param($param_num++);
 	    }
             else {
 	         $val = $self->get_row_value($val,$eval);
 	    }
-#print $col->name."~".$self->{ORG_NAME}->{$col->name}."\n";
-#	    my $ccnum = $table->column_num($col->name);
-#	    if (!defined $ccnum) {
-#                $ccnum = $table->column_num(qq/"$col->name"/);
-#	    }
-#            $array->[$ccnum] = $val;
             $array->[$table->column_num($col->name())] = $val;
-#            $array->[$table->column_num(lc $col->name())] = $val;
-
-#if ( $self->{ORG_NAME}->{$col->name} ) {
-#    $col = qq/"/.$self->{ORG_NAME}->{$col}.qq/"/;
-#} 
-#            $array->[$table->column_num($col->name())] = $val;
         }
     } else {
         return $self->do_err("Bad col names in INSERT");
-        # INSERT INTO $table VALUES (value, ...)
-        # NOT USED BECAUSE $cNum automatically assigned
-#        $cNum = scalar($self->row_values());
-#        for ($i = 0;  $i < $cNum;  $i++) {
-#            $val = $self->row_values($i);
-#            $val = $self->get_row_value($val);
-#            if (ref($val) eq 'SQL::Statement::Param') {
-#                $val = $eval->param($val->num());
-#            }
-#            $array->[$i] = $val;
-#        }
     }
     $table->push_row($data, $array);
     (1, 0);
@@ -285,6 +296,17 @@ sub DELETE ($$$) {
     my($table) = $eval->table($self->tables(0)->name());
     my($affected) = 0;
     my(@rows, $array);
+    if ( $table->can('delete_one_row') ) {
+        while (my $array = $table->fetch_row($data)) {
+            if ($self->eval_where($eval,'',$array)) {
+                ++$affected;
+                $array = $self->{fetched_value} if $self->{fetched_from_key};
+                $table->delete_one_row($data,$array);
+                return ($affected, 0) if $self->{fetched_from_key};
+	      }
+        }
+        return ($affected, 0);
+    }
     while ($array = $table->fetch_row($data)) {
         if ($self->eval_where($eval,'',$array)) {
             ++$affected;
@@ -320,9 +342,12 @@ sub UPDATE ($$$) {
     my($table) = $eval->table($self->tables(0)->name());
     my $tname = $self->tables(0)->name();
     my($affected) = 0;
-    my(@rows, $array, $val, $col, $i);
+    my(@rows, $array, $f_array, $val, $col, $i);
     while ($array = $table->fetch_row($data)) {
         if ($self->eval_where($eval,$tname,$array)) {
+            if( $self->{fetched_from_key} and $table->can('update_one_row') ){
+                $array = $self->{fetched_value};
+            }
         my $param_num =$arg_num;
         #print $param_num;
         #print $eval->param($param_num); print "@$params"; exit;
@@ -350,6 +375,10 @@ sub UPDATE ($$$) {
                 $array->[$table->column_num($col->name())] = $val;
             }
             ++$affected;
+        }
+        if ($self->{fetched_from_key}){
+            $table->update_one_row($data,$array);
+            return ($affected, 0);
         }
         push(@rows, $array);
     }
@@ -703,6 +732,7 @@ sub SELECT ($$) {
         }
         if ($col eq '*') {
             $ar = $table->col_names();
+
 #@$ar = map {lc $_} @$ar;
             for ($i = 0;  $i < @$ar;  $i++) {
                 my $cName = $ar->[$i];
@@ -784,6 +814,7 @@ sub SELECT ($$) {
     }
     while (my $array = $table->fetch_row($data)) {
         if ($self->eval_where($e,$tableName,$array)) {
+            $array = $self->{fetched_value} if $self->{fetched_from_key};
             # Note we also include the columns from @extraSortCols that
             # have to be ripped off later!
             my @row;
@@ -793,10 +824,12 @@ sub SELECT ($$) {
             #            else {
                 @extraSortCols = () unless @extraSortCols;
             #print "[$_]" for @$cList; print "\n";
-###new
+
             @row = map { defined $_ and defined $array->[$_] ? $array->[$_] : undef } (@$cList, @extraSortCols);
-            #	    }
             push(@$rows, \@row);
+            return (scalar(@$rows),scalar @{$self->{column_names}},$rows)
+ 	        if $self->{fetched_from_key};
+            #	    }
         }
     }
     if (@order_by) {
@@ -825,8 +858,8 @@ sub SELECT ($$) {
                     $result = defined $d ? -1 : 0;
                 } elsif (!defined($d)) {
                     $result = 1;
-#	        } elsif ( is_number($c) && is_number($d) ) {
-	        } elsif ( $c =~ $numexp && $d =~ $numexp ) {
+	        } elsif ( is_number($c,$d) ) {
+#	        } elsif ( $c =~ $numexp && $d =~ $numexp ) {
                     $result = ($c <=> $d);
                 } else {
   		    if ($self->{"case_fold"}) {
@@ -910,7 +943,7 @@ sub SELECT ($$) {
             my $sf_index = -1;
  	    for my $sf(@{$self->{"set_function"}}) {
               $sf_index++;
-	      if ($sf->{"arg"} eq '*') {
+	      if ($sf->{arg} and $sf->{"arg"} eq '*') {
                   $final_row[$sf_index]++;
 	      }
               else {
@@ -922,7 +955,8 @@ sub SELECT ($$) {
 #                $final += $v  if $name =~ /SUM|AVG/;
                 if( $name =~ /SUM|AVG/) {
                     return $self->do_err("Can't use $name on a string!")
-                      unless $v =~ $numexp;
+#                      unless $v =~ $numexp;
+                      unless is_number($v);
                     $final += $v;
                 }
                 #
@@ -963,11 +997,11 @@ sub anycmp($$) {
     my ($a,$b) = @_;
     $a = '' unless defined $a;
     $b = '' unless defined $b;
-    return ($a =~ $numexp && $b =~ $numexp)
+#    return ($a =~ $numexp && $b =~ $numexp)
+    return ( is_number($a,$b) )
         ? ($a <=> $b)
         : ($a cmp $b);
 }
-
 
 sub eval_where {
     my $self   = shift;
@@ -1037,7 +1071,8 @@ sub process_predicate {
 	    }
             else {
                 if (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
-                    $op = ( $val1 =~ $numexp && $val2 =~ $numexp )
+#                    $op = ( $val1 =~ $numexp && $val2 =~ $numexp )
+                    $op = ( is_number($val1,$val2) )
                         ? $s2pops->{"$op"}->{'n'}
                         : $s2pops->{"$op"}->{'s'};
                 }
@@ -1045,12 +1080,26 @@ sub process_predicate {
 	}
         else {
             if (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
-                $op = ( $val1 =~ $numexp && $val2 =~ $numexp )
+#                $op = ( $val1 =~ $numexp && $val2 =~ $numexp )
+                $op = ( is_number($val1,$val2) )
                     ? $s2pops->{"$op"}->{'n'}
                     : $s2pops->{"$op"}->{'s'};
 	    }
         }
 #        print "[$val1] [$op] [$val2]\n";
+        my $neg = $pred->{"neg"};
+        my($table) = $eval->table($self->tables(0)->name());
+    if ( $pred->{op} eq '=' and !$neg and $table->can('fetch_one_row')
+       ) {
+        my $key_col = $table->fetch_one_row(1,1);
+        if ($pred->{arg1}->{value} =~ /^$key_col$/i) {
+            $self->{fetched_from_key}=1;
+            $self->{fetched_value} = $table->fetch_one_row(
+                0,$val2
+            );
+            return 1;
+	}
+    }
         my $match = $self->is_matched($val1,$op,$val2) || 0;
         if ($pred->{"neg"}) {
            $match = $match ? 0 : 1;
@@ -1059,12 +1108,6 @@ sub process_predicate {
     }
 }
 
-sub is_number {
-    my $x=shift;
-    return 0 if !defined $x;
-    return 1 if $x =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
-    return 0;
-}
 sub is_matched {
     my($self,$val1,$op,$val2)=@_;
     #print "[$val1] [$op] [$val2]\n";
@@ -1125,9 +1168,7 @@ sub open_tables {
         my $name = $_->{"name"};
         undef $@;
         eval{
-            my $open_name = $name;
-            $open_name = $self->{org_table_names}->[$count];
-#print "[$topen_name]";
+            my $open_name = $self->{org_table_names}->[$count];
            if ($caller && $caller =~ /^DBD::AnyData/) {
                $caller .= '::Statement' if $caller !~ /::Statement/;
                $t->{"$name"} = $caller->open_table($data, $open_name,
@@ -1142,8 +1183,6 @@ sub open_tables {
         my $err = $t->{"$name"}->{errstr};
         return $self->do_err($err) if $err;
         return $self->do_err($@) if $@;
-        return(SQL::Eval->new({'tables' => $t}), [])
-            if $self->command eq 'DROP';
 my @cnames;
 for my $c(@{$t->{"$name"}->{"col_names"}}) {
   my $newc;
@@ -1157,15 +1196,13 @@ for my $c(@{$t->{"$name"}->{"col_names"}}) {
   }
    push @cnames, $newc;
    $self->{ORG_NAME}->{$newc}=$c;
-#   push @{$self->{ORG_NAME}},$c;
-
 }
 my $col_nums;
 my $i=0;
 for (@cnames) {
   $col_nums->{$_} = $i++;
 }
-$t->{"$name"}->{"col_nums"}  = $col_nums;
+$t->{"$name"}->{"col_nums"}  = $col_nums; # upper cased
 $t->{"$name"}->{"col_names"} = \@cnames;
 #use mylibs; zwarn $t->{$name};
         my $tcols = $t->{"$name"}->col_names;
@@ -1359,13 +1396,13 @@ sub verify_columns {
     return $fully_qualified_cols;
 }
 
+
 sub distinct {
     my $self = shift;
     return 1 if $self->{"set_quantifier"}
        and $self->{"set_quantifier"} eq 'DISTINCT';
     return 0;
 }
-
 
 sub command { shift->{"command"} }
 
@@ -1393,7 +1430,7 @@ sub row_values {
         return $self->{"values"}->[$val_num];
     }
     if (wantarray) {
-        return map{$_->{"values"} } @{$self->{"values"}};
+        return map{$_->{"value"} } @{$self->{"values"}};
     }
     else {
         return scalar @{ $self->{"values"} };
@@ -1454,7 +1491,8 @@ sub get_row_value {
                my $val = $self->get_row_value($vals[$i],$eval,$rowhash);
                return $self->do_err(
                    qq{Bad numeric expression '$vals[$i]->{"value"}'!}
-               ) unless defined $val and $val =~ $numexp;
+#               ) unless defined $val and $val =~ $numexp;
+               ) unless defined $val and is_number($val);
                $str =~ s/\?$i\?/$val/;
 	   }
            $str =~ s/\s//g;
@@ -1512,7 +1550,6 @@ sub columns {
     }
 
 }
-
 sub colname2table {
     my $self = shift;
     my $col_name = shift;
@@ -1678,8 +1715,6 @@ sub do_err {
 
     $self->{"errstr"} = $err;
     warn $err if $self->{"PrintError"};
-    # print $err if $self->{"PrintError"};
-#    die "\n" if $self->{"RaiseError"};
     die "$err" if $self->{"RaiseError"};
     return undef;
 }
@@ -1688,6 +1723,72 @@ sub errstr {
     my $self = shift;
     $self->{"errstr"};
 }
+
+sub where {
+    my $self = shift;
+    return undef unless $self->{"where_clause"};
+   $warg_num = 0;
+    return SQL::Statement::Op->new(
+        $self->{"where_clause"},
+        $self->{"tables"},
+    );
+}
+
+sub where_hash {
+    my $self = shift;
+    return $self->{where_clause};
+}
+
+
+package SQL::Statement::Op;
+
+sub new {
+    my($class,$wclause,$tables) = @_;
+    if (ref $tables->[0]) {
+        @$tables = map {$_->name} @$tables;
+    }
+    my $self = {};
+    $self->{"op"}   = $wclause->{"op"};
+    $self->{"neg"}  = $wclause->{"neg"};
+    $self->{"arg1"} = get_pred( $wclause->{"arg1"}, $tables );
+    $self->{"arg2"} = get_pred( $wclause->{"arg2"}, $tables );
+    return bless $self, $class;
+}
+sub get_pred {
+    my $arg    = shift;
+    my $tables = shift;
+    if (defined $arg->{type}) {
+        if ( $arg->{type} eq 'column') {
+            return SQL::Statement::Column->new( $arg->{value}, $tables );
+        }
+        elsif ( $arg->{type} eq 'placeholder') {
+            return SQL::Statement::Param->new( $main::warg_num++ );
+        }
+        else {
+            return $arg->{value};
+        }
+    }
+    else {
+        return SQL::Statement::Op->new( $arg, $tables );
+    }
+}
+sub op {
+    my $self = shift;
+    return $self->{"op"};
+}
+sub arg1 {
+    my $self = shift;
+    return $self->{"arg1"};
+}
+sub arg2 {
+    my $self = shift;
+    return $self->{"arg2"};
+}
+sub neg {
+    my $self = shift;
+    return $self->{"neg"};
+}
+
 
 package SQL::Statement::TempTable;
 
@@ -1725,6 +1826,7 @@ sub column_num  {
     return $new_col
 }
 sub fetch_row { my $s=shift; return shift @{ $s->{"table"} } }
+
 
 package SQL::Statement::Order;
 
@@ -2572,7 +2674,7 @@ All rights reserved.
 
 You may distribute this module under the terms of either the GNU
 General Public License or the Artistic License, as specified in
-the Perl README file. 
+the Perl README file.
 
 
 =head1 SEE ALSO

@@ -1,6 +1,5 @@
 package SQL::Dialects::CSV;
 
-=pod
 
 =head1 NAME
 

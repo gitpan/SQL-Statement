@@ -323,7 +323,7 @@ All rights reserved.
 
 You may distribute this module under the terms of either the GNU
 General Public License or the Artistic License, as specified in
-the Perl README file. 
+the Perl README file.
 
 
 =head1 SEE ALSO

@@ -16,7 +16,7 @@ use constant FUNCTION_NAMES => join '|', qw(
     TRIM SUBSTRING UPPER LOWER TO_CHAR
 );
 
-$VERSION = '1.005';
+$VERSION = '1.06';
 
 BEGIN { if( $ENV{SQL_USER_DEFS} ) { require SQL::UserDefs; } }
 
@@ -96,12 +96,23 @@ sub parse {
             delete $self->{"struct"}->{"join"};
 	}
         $self->replace_quoted_ids();
-$self->{struct}->{org_table_names} = $self->{struct}->{table_names};
+#print "<@{$self->{struct}->{table_names}}>";
+	for (@{$self->{struct}->{table_names}}) {
+            push @{$self->{struct}->{org_table_names}},$_;
+	}
+#$self->{struct}->{org_table_names} = $self->{struct}->{table_names};
 my @uTables = map {uc $_ } @{$self->{struct}->{table_names}};
-$self->{struct}->{table_names} = \@uTables;
-$self->{struct}->{org_col_names} = $self->{struct}->{column_names};
+$self->{struct}->{table_names} = \@uTables unless $com eq 'CREATE';
+#print "[",@{$self->{struct}->{column_names}},"]\n" if $self->{struct}->{column_names} and $com eq 'SELECT';
+	if ($self->{struct}->{column_names}) {
+	for (@{$self->{struct}->{column_names}}) {
+            push @{$self->{struct}->{org_col_names}},
+                 $self->{struct}->{ORG_NAME}->{uc $_};
+	}
+	}
+#$self->{struct}->{org_col_names} = $self->{struct}->{column_names};
 my @uCols = map {uc $_ } @{$self->{struct}->{column_names}};
-$self->{struct}->{column_names} = \@uCols;
+$self->{struct}->{column_names} = \@uCols unless $com eq 'CREATE';
 	if ($self->{original_string} =~ /Y\.\*/) {
 #use mylibs; zwarn $self; exit;
 	}
@@ -607,6 +618,7 @@ sub CREATE {
         $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_type"} = $type;
         $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_length"} = $length;
         push @{$self->{"struct"}->{"column_names"}},$name;
+        #push @{$self->{"struct"}->{ORG_NAME}},$name;
         my $tmpname = $name;
         $tmpname = uc $tmpname unless $tmpname =~ /^"/;
         return $self->do_err("Duplicate column names!") 
@@ -1426,9 +1438,11 @@ sub COLUMN_NAME {
     }
     else {
 #      $col_name = lc $col_name;
-      $col_name = uc $col_name;
+      $col_name = uc $col_name unless $self->{struct}->{command} eq 'CREATE';
+
     } 
     $self->{struct}->{ORG_NAME}->{$col_name} = $orgcol;
+
 #
 #
     if ($table_name) {
@@ -1773,7 +1787,6 @@ sub do_err {
 
 __END__
 
-=pod
 
 =head1 NAME
 
@@ -1836,9 +1849,9 @@ this is what is supported:
 
  CREATE [ {LOCAL|GLOBAL} TEMPORARY ] TABLE $table
         (
-           $col_1 $col_type1 $col_constraints1, 
+           $col_1 $col_type1 $col_constraints1,
            ...,
-           $col_N $col_typeN $col_constraintsN, 
+           $col_N $col_typeN $col_constraintsN,
         )
         [ ON COMMIT {DELETE|PRESERVE} ROWS ]
 
@@ -1893,7 +1906,7 @@ this is what is supported:
 
       SELECT select_clause
         FROM from_clause
-     [ WHERE search_condition ] 
+     [ WHERE search_condition ]
   [ ORDER BY $ocol1 [ASC|DESC], ... $ocolN [ASC|DESC] ]
      [ LIMIT [start,] length ]
 
@@ -1924,7 +1937,7 @@ this is what is supported:
       * self-joins are not currently supported
       * if implicit joins are used, the WHERE clause must contain
         and equijoin condition for each table
-           
+
 
 =head2 SEARCH CONDITION
 
@@ -1933,10 +1946,10 @@ this is what is supported:
 
 =head2 OPERATORS
 
-       $op  = |  <> |  < | > | <= | >= 
+       $op  = |  <> |  < | > | <= | >=
               | IS NULL | IS NOT NULL | LIKE | CLIKE | BETWEEN | IN
 
-  The "CLIKE" operator works exactly the same as the "LIKE" 
+  The "CLIKE" operator works exactly the same as the "LIKE"
   operator, but is case insensitive.  For example:
 
       WHERE foo LIKE 'bar%'   # succeeds if foo is "barbaz"
@@ -1969,7 +1982,7 @@ both sides of a string.
 
  Examples:
 
- TRIM( string ) 
+ TRIM( string )
    trims leading and trailing spaces from string
 
  TRIM( LEADING FROM str )

@@ -1,6 +1,5 @@
 package SQL::Dialects::ANSI;
 
-=pod
 
 =head1 NAME
 
