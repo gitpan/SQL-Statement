@@ -79,6 +79,11 @@ DESCRIPTION
 
               SELECT a.id, b.name FROM a, b WHERE a.id = b.id AND a.id = 2
 
+    misc.files_as_tables
+            By default table names must be simple identifiers. This
+            feature forces the acceptance of file names as tables.
+            However, file names must start with '/', './' or '../'.
+
     To enable or disable a feature, for example *select.join*, use
     the following:
 

@@ -6,7 +6,8 @@
 
 sql_parser_t ansiParser = {
     { 0, 0, 0 },
-    { 1 }
+    { 1 },
+    { 0 }
 };
 
 

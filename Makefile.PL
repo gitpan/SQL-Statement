@@ -19,7 +19,7 @@ ExtUtils::MakeMaker::WriteMakefile(
 			 'COMPRESS'     => "gzip -9f" },
     'C' => ['sql_yacc.c sql_data.c sql_op.c'],
     'OBJECT' => 'sql_yacc.o sql_data.o sql_op.o Statement.o',
-    ($defines ? ('DEFINE' => $defines) : ())
+    ($defines ? ('DEFINE' => $defines) : ()),
 );
 
 

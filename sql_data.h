@@ -146,6 +146,9 @@ typedef struct {
      struct {
          char join;
      } select;
+     struct {
+         char files_as_tables;
+     } misc;
 } sql_parser_t;
 
 typedef struct sql_stmt_s {

@@ -9,7 +9,8 @@
 
 static sql_parser_t sqlEvalParser = {
     { 1, 1, 1 },
-    { 0 }
+    { 0 },
+    { 1 }
 };
 
 
@@ -721,6 +722,14 @@ feature(self, set, f, val=NULL)
 	        if (fLen == 4) {
 		    if (strnEQ(fName, "join", 4)) {
 		        fPtr = &parser->select.join;
+		    }
+		}
+	    }
+	} else if (setLen == 4) {
+	    if (strnEQ(setName, "misc", 6)) {
+	        if (fLen == 15) {
+		    if (strnEQ(fName, "files_as_tables", 15)) {
+		        fPtr = &parser->misc.files_as_tables;
 		    }
 		}
 	    }

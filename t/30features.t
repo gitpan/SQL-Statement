@@ -18,11 +18,14 @@ sub Parse($$) {
     my($statement, $parser) = @_;
     $@ = '';
     my($stmt) = eval { SQL::Statement->new($statement, $parser); };
-    return $stmt  &&  !$@;
+    if ($@) {
+	return undef;
+    }
+    return $stmt;
 }
 
 
-print "1..25\n";
+print "1..38\n";
 
 my($ansiParser, $sqlEvalParser, $freeParser, $query);
 Test($ansiParser = SQL::Parser->new("Ansi"));
@@ -62,6 +65,23 @@ Test(!$freeParser->feature("select", "join", 0));
 Test(!Parse("SELECT * FROM a, b", $freeParser));
 Test($freeParser->feature("select", "join", 1));
 Test(Parse("SELECT * FROM a, b", $freeParser));
+
+
+# Check the files_as_tables feature
+Test(!$freeParser->feature("misc", "files_as_tables"));
+Test($freeParser->feature("misc", "files_as_tables", 1));
+my $stmt;
+Test($stmt = Parse("SELECT * FROM /a/b", $freeParser));
+Test($stmt->tables(0)->name() eq '/a/b');
+Test($stmt = Parse("SELECT * FROM ./a/b", $freeParser));
+Test($stmt->tables(0)->name() eq './a/b');
+Test($stmt = Parse("SELECT * FROM ../a/b", $freeParser));
+Test($stmt->tables(0)->name() eq '../a/b');
+Test(!$freeParser->feature("misc", "files_as_tables", 0));
+Test(!Parse("SELECT * FROM /a/b", $freeParser));
+Test(!Parse("SELECT * FROM ./a/b", $freeParser));
+Test(!Parse("SELECT * FROM ./a/b", $freeParser));
+Test(Parse("SELECT * FROM a", $freeParser));
 
 
 # Check a not existing feature
