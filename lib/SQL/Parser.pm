@@ -2,8 +2,9 @@
 package SQL::Parser;
 ######################################################################
 #
-# This module is copyright (c), 2001 by Jeff Zucker.
+# This module is copyright (c), 2001,2002 by Jeff Zucker.
 # All rights resered.
+#
 # It may be freely distributed under the same terms as Perl itself.
 # See below for help and copyright information (search for SYNOPSIS).
 #
@@ -11,8 +12,13 @@ package SQL::Parser;
 
 use strict;
 use vars qw($VERSION);
+use constant FUNCTION_NAMES => join '|', qw(
+    TRIM SUBSTRING UPPER LOWER TO_CHAR
+);
 
-$VERSION = '1.004';
+$VERSION = '1.005';
+
+BEGIN { if( $ENV{SQL_USER_DEFS} ) { require SQL::UserDefs; } }
 
 
 #############################
@@ -90,9 +96,22 @@ sub parse {
             delete $self->{"struct"}->{"join"};
 	}
         $self->replace_quoted_ids();
+$self->{struct}->{org_table_names} = $self->{struct}->{table_names};
+my @uTables = map {uc $_ } @{$self->{struct}->{table_names}};
+$self->{struct}->{table_names} = \@uTables;
+$self->{struct}->{org_col_names} = $self->{struct}->{column_names};
+my @uCols = map {uc $_ } @{$self->{struct}->{column_names}};
+$self->{struct}->{column_names} = \@uCols;
+	if ($self->{original_string} =~ /Y\.\*/) {
+#use mylibs; zwarn $self; exit;
+	}
         return $rv;
     } 
     else {
+       $self->{struct}={};
+       if ($ENV{SQL_USER_DEFS}) {
+           return SQL::UserDefs::user_parse($self,$sql);
+       }
        return $self->do_err("Command '$com' not recognized or not supported!");
     }
 }
@@ -214,6 +233,10 @@ sub DROP {
     my $stmt = shift;
     my $table_name;
     $self->{"struct"}->{"command"}     = 'DROP';
+    if ($stmt =~ /^\s*DROP\s+TABLE\s+IF\s+EXISTS\s+(.*)$/si ) {
+        $stmt = "DROP TABLE $1";
+        $self->{"struct"}->{ignore_missing_table}=1;
+    }
     if ($stmt =~ /^\s*DROP\s+(\S+)\s+(.+)$/si ) {
        my $com2    = $1 || '';
        $table_name = $2;
@@ -450,12 +473,12 @@ sub INSERT {
     my $col_str;
     my($table_name,$val_str) = $str =~
         /^INSERT\s+INTO\s+(.+?)\s+VALUES\s+\((.+?)\)$/i;
-    if ($table_name =~ /[()]/ ) {
+    if ($table_name and $table_name =~ /[()]/ ) {
     ($table_name,$col_str,$val_str) = $str =~
         /^INSERT\s+INTO\s+(.+?)\s+\((.+?)\)\s+VALUES\s+\((.+?)\)$/i;
     }
     return $self->do_err('No table name specified!') unless $table_name;
-    return $self->do_err('Missing values list!') unless $val_str;
+    return $self->do_err('Missing values list!') unless defined $val_str;
     return undef unless $self->TABLE_NAME($table_name);
     $self->{"struct"}->{"command"} = 'INSERT';
     $self->{"struct"}->{"table_names"} = [$table_name];
@@ -510,7 +533,7 @@ sub CREATE {
     my $self = shift;
     my $stmt = shift;
     $self->{"struct"}->{"command"} = 'CREATE';
-    my($table_name,$table_element_def);
+    my($table_name,$table_element_def,%is_col_name);
     if ($stmt =~ /^CREATE (LOCAL|GLOBAL) TEMPORARY TABLE(.*)$/si ) {
         $self->{"struct"}->{"table_type"} = "$1 TEMPORARY";
         $stmt = "CREATE TABLE$2";
@@ -531,6 +554,7 @@ sub CREATE {
     else {
         return $self->do_err( "Can't find column definitions!" );
     }
+    return undef unless $self->TABLE_NAME($table_name);
     $table_element_def =~ s/\s+\(/(/g;
     my $primary_defined;
     for my $col(split ',',$table_element_def) {
@@ -552,14 +576,14 @@ sub CREATE {
            for my $constr(@c) {
    	       if ( $constr =~ /^\s*(UNIQUE|NOT_NULL|PRIMARY_KEY)\s*$/i ) {
                    my $cur_c = uc $1;
-                   if ($has_c{$cur_c}) {
+                   if ($has_c{$cur_c}++) {
   		       return $self->do_err(
-                           qq~Duplicate constraint: '$constr'!~
+                           qq~Duplicate column constraint: '$constr'!~
                        );
 		   }
                    if ($cur_c eq 'PRIMARY_KEY' and $primary_defined++ ) {
   		       return $self->do_err(
-                           qq~There can be only one PRIMARY KEY in a table!~
+                           qq~Can't have two PRIMARY KEYs in a table!~
                         );
 		   }
                    $constr =~ s/_/ /g;
@@ -567,7 +591,7 @@ sub CREATE {
 
 	       }
                else {
-		   return $self->do_err("Bad column constraint: '$constr'!");
+		   return $self->do_err("Unknown column constraint: '$constr'!");
 	       }
 	   }
 	}
@@ -583,6 +607,10 @@ sub CREATE {
         $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_type"} = $type;
         $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_length"} = $length;
         push @{$self->{"struct"}->{"column_names"}},$name;
+        my $tmpname = $name;
+        $tmpname = uc $tmpname unless $tmpname =~ /^"/;
+        return $self->do_err("Duplicate column names!") 
+          if $is_col_name{$tmpname}++;
 
     } 
     $self->{"struct"}->{"table_names"} = [$table_name];
@@ -601,7 +629,7 @@ sub SET_CLAUSE_LIST {
     my(@cols,@vals);
     for(@sets) {
         my($col,$val) = split / = /,$_;
-        return $self->do_err('Incomplete SET clause!') if !$col or !$val;
+        return $self->do_err('Incomplete SET clause!') if !defined $col or !defined $val;
         push @cols, $col;
         push @vals, $val;
     }
@@ -636,7 +664,13 @@ sub SELECT_LIST {
     $col =~ s/^\s+//;
     $col =~ s/\s+$//;
         if ($col =~ /^(\S+)\.\*$/) {
-            my $table = $1;
+        my $table = $1;
+        my %is_table_alias = %{$self->{"tmp"}->{"is_table_alias"}};
+        $table = $is_table_alias{$table} if $is_table_alias{$table};
+        $table = $is_table_alias{"\L$table"} if $is_table_alias{"\L$table"};
+#        $table = uc $table unless $table =~ /^"/;
+#use mylibs; zwarn \%is_table_alias;
+#print "\n<<$table>>\n";
             return undef unless $self->TABLE_NAME($table);
             $table = $self->replace_quoted_ids($table);
             push @newcols, "$table.*";
@@ -661,6 +695,7 @@ sub SET_FUNCTION_SPEC {
             my $distinct;
             if ( $set_function_arg =~ s/(DISTINCT|ALL) (.+)$/$2/i ) {
                 $distinct = uc $1;
+                $self->{"struct"}->{"set_quantifier"} = $distinct;
 	    } 
             my $count_star = 1 if $set_function_name eq 'COUNT'
                               and $set_function_arg eq '*';
@@ -986,10 +1021,14 @@ sub group_ands{
 # replaces string function parens with square brackets
 # e.g TRIM (foo) -> TRIM[foo]
 #
+
 sub nongroup_string {
+    my $f= FUNCTION_NAMES;
     my $str = shift;
-    $str =~ s/(TRIM|SUBSTRING|UPPER|LOWER) \(([^()]+)\)/$1\[$2\]/gi;
-    if ( $str =~ /(TRIM|SUBSTRING|UPPER|LOWER) \(/i ) {
+#    $str =~ s/(TRIM|SUBSTRING|UPPER|LOWER) \(([^()]+)\)/$1\[$2\]/gi;
+    $str =~ s/($f) \(([^()]+)\)/$1\[$2\]/gi;
+#    if ( $str =~ /(TRIM|SUBSTRING|UPPER|LOWER) \(/i ) {
+    if ( $str =~ /($f) \(/i ) {
         return nongroup_string($str);
     }
     else {
@@ -1126,8 +1165,11 @@ sub PREDICATE {
 
 sub undo_string_funcs {
     my $str = shift;
-    $str =~ s/(TRIM|UPPER|LOWER|SUBSTRING)\[([^\]\[]+?)\]/$1 ($2)/;
-    if ($str =~ /(TRIM|UPPER|LOWER|SUBSTRING)\[/) {
+    my $f= FUNCTION_NAMES;
+#    $str =~ s/(TRIM|UPPER|LOWER|SUBSTRING)\[([^\]\[]+?)\]/$1 ($2)/;
+#    if ($str =~ /(TRIM|UPPER|LOWER|SUBSTRING)\[/) {
+    $str =~ s/($f)\[([^\]\[]+?)\]/$1 ($2)/;
+    if ($str =~ /($f)\[/) {
         return undo_string_funcs($str);
     }
     return $str;
@@ -1208,6 +1250,18 @@ sub ROW_VALUE {
         };
     }
 
+    # TO_CHAR (value)
+    #
+    if ($str =~ /^TO_CHAR \((.+)\)\s*$/i ) {
+        my $name  = 'TO_CHAR';
+        my $value = $self->ROW_VALUE($1);
+        return undef unless $value;
+        return {
+            type  => 'function',
+            name  => $name,
+            value => $value,
+        };
+    }
 
     # UPPER (value) and LOWER (value)
     #
@@ -1365,7 +1419,7 @@ sub COLUMN_NAME {
     $col_name =~ s/\s+$//;
     return undef unless $col_name eq '*' or $self->IDENTIFIER($col_name);
 #
-# MAKE COL NAMES ALL LOWER CASE
+# MAKE COL NAMES ALL UPPER CASE
     my $orgcol = $col_name;
     if ($col_name =~ /^\?QI(\d+)\?$/) {
         $col_name = $self->replace_quoted_ids($col_name);
@@ -1379,10 +1433,11 @@ sub COLUMN_NAME {
 #
     if ($table_name) {
        my $alias = $self->{tmp}->{is_table_alias}->{"\L$table_name"};
-#use mylibs; print "$table_name"; zwarn $self->{tmp}; exit;
+#use mylibs; print "$table_name"; zwarn $self->{tmp};
        $table_name = $alias if defined $alias;
 $table_name = uc $table_name;
        $col_name = "$table_name.$col_name";
+#print "<<$col_name>>"; 
     }
     return $col_name;
 }
@@ -1484,8 +1539,9 @@ sub TABLE_NAME {
     if (!$table_name) {
         return $self->do_err('No table name specified!');
     }
-    return undef if !($self->IDENTIFIER($table_name));
-    return 1;
+    return $self->IDENTIFIER($table_name);
+#    return undef if !($self->IDENTIFIER($table_name));
+#    return 1;
 }
 
 
@@ -1514,7 +1570,11 @@ sub IDENTIFIER {
         $err .= "contains more than 128 characters!";
         return $self->do_err( $err );
     }
-    if ( $self->{"opts"}->{"reserved_words"}->{"$id"} ) {   # BAD RESERVED WORDS
+$id = uc $id;
+#print "<$id>";
+#use mylibs; zwarn $self->{opts}->{reserved_words};
+#exit;
+    if ( $self->{"opts"}->{"reserved_words"}->{$id} ) {   # BAD RESERVED WORDS
         $err .= "is a SQL reserved word!";
         return $self->do_err( $err );
     }
@@ -1705,7 +1765,7 @@ sub do_err {
     $self->{"struct"}->{"errstr"} = $err;
     #$self->{"errstr"} = $err;
     warn $err if $self->{"PrintError"};
-    die if $self->{"RaiseError"};
+    die $err if $self->{"RaiseError"};
     return undef;
 }
 
@@ -1850,7 +1910,7 @@ this is what is supported:
              table1 [, table2, ... tableN]
            | table1 NATURAL [join_type] JOIN table2
            | table1 [join_type] table2 USING (col1,col2, ... colN)
-           | table1 [join_type] JOIN table2 ON (table1.colA = table2.colB)
+           | table1 [join_type] JOIN table2 ON table1.colA = table2.colB
 
       * join type ::=
              INNER

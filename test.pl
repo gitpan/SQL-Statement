@@ -56,32 +56,32 @@ CREATE TABLE foo ( id INTEGER PRIMARY KEY, phrase VARCHAR(40) NOT NULL )
 CREATE TABLE foo ( id INTEGER NOT NULL, phrase VARCHAR(40) NOT NULL )
 CREATE TABLE foo ( id INTEGER UNIQUE NOT NULL, phrase VARCHAR(40) )
   /* JOINS */
-SELECT Lnum,Llet,Ulet FROM lower NATURAL INNER JOIN upper
-SELECT Lnum,Llet,Ulet FROM lower NATURAL LEFT JOIN upper
-SELECT Lnum,Llet,Ulet FROM lower NATURAL RIGHT JOIN upper
-SELECT Lnum,Llet,Ulet FROM lower NATURAL FULL JOIN upper
-SELECT Lnum,Llet,Ulet FROM lower INNER JOIN upper ON Lnum = Unum
-SELECT Lnum,Llet,Ulet FROM lower LEFT JOIN upper ON Lnum = Unum
-SELECT Lnum,Llet,Ulet FROM lower RIGHT JOIN upper ON Lnum = Unum
-SELECT Lnum,Llet,Ulet FROM lower FULL JOIN upper ON Lnum = Unum
-SELECT Lnum,Llet,Ulet FROM lower INNER JOIN upper USING(num)
-SELECT Lnum,Llet,Ulet FROM lower LEFT JOIN upper USING(num)
-SELECT Lnum,Llet,Ulet FROM lower RIGHT JOIN upper USING(num)
-SELECT Lnum,Llet,Ulet FROM lower FULL JOIN upper USING(num)
-SELECT Lnum,Llet,Ulet FROM lower,upper WHERE Lnum = Unum
-SELECT * FROM lower NATURAL INNER JOIN upper
-SELECT * FROM lower NATURAL LEFT JOIN upper
-SELECT * FROM lower NATURAL RIGHT JOIN upper
-SELECT * FROM lower NATURAL FULL JOIN upper
-SELECT * FROM lower INNER JOIN upper ON Lnum = Unum
-SELECT * FROM lower LEFT JOIN upper ON Lnum = Unum
-SELECT * FROM lower RIGHT JOIN upper ON Lnum = Unum
-SELECT * FROM lower FULL JOIN upper ON Lnum = Unum
-SELECT * FROM lower INNER JOIN upper USING(num)
-SELECT * FROM lower LEFT JOIN upper USING(num)
-SELECT * FROM lower RIGHT JOIN upper USING(num)
-SELECT * FROM lower FULL JOIN upper USING(num)
-SELECT * FROM lower,upper WHERE Lnum = Unum
+SELECT Lnum,Llet,Ulet FROM zLower NATURAL INNER JOIN zUpper
+SELECT Lnum,Llet,Ulet FROM zLower NATURAL LEFT JOIN zUpper
+SELECT Lnum,Llet,Ulet FROM zLower NATURAL RIGHT JOIN zUpper
+SELECT Lnum,Llet,Ulet FROM zLower NATURAL FULL JOIN zUpper
+SELECT Lnum,Llet,Ulet FROM zLower INNER JOIN zUpper ON Lnum = Unum
+SELECT Lnum,Llet,Ulet FROM zLower LEFT JOIN zUpper ON Lnum = Unum
+SELECT Lnum,Llet,Ulet FROM zLower RIGHT JOIN zUpper ON Lnum = Unum
+SELECT Lnum,Llet,Ulet FROM zLower FULL JOIN zUpper ON Lnum = Unum
+SELECT Lnum,Llet,Ulet FROM zLower INNER JOIN zUpper USING(num)
+SELECT Lnum,Llet,Ulet FROM zLower LEFT JOIN zUpper USING(num)
+SELECT Lnum,Llet,Ulet FROM zLower RIGHT JOIN zUpper USING(num)
+SELECT Lnum,Llet,Ulet FROM zLower FULL JOIN zUpper USING(num)
+SELECT Lnum,Llet,Ulet FROM zLower,zUpper WHERE Lnum = Unum
+SELECT * FROM zLower NATURAL INNER JOIN zUpper
+SELECT * FROM zLower NATURAL LEFT JOIN zUpper
+SELECT * FROM zLower NATURAL RIGHT JOIN zUpper
+SELECT * FROM zLower NATURAL FULL JOIN zUpper
+SELECT * FROM zLower INNER JOIN zUpper ON Lnum = Unum
+SELECT * FROM zLower LEFT JOIN zUpper ON Lnum = Unum
+SELECT * FROM zLower RIGHT JOIN zUpper ON Lnum = Unum
+SELECT * FROM zLower FULL JOIN zUpper ON Lnum = Unum
+SELECT * FROM zLower INNER JOIN zUpper USING(num)
+SELECT * FROM zLower LEFT JOIN zUpper USING(num)
+SELECT * FROM zLower RIGHT JOIN zUpper USING(num)
+SELECT * FROM zLower FULL JOIN zUpper USING(num)
+SELECT * FROM zLower,zUpper WHERE Lnum = Unum
   /* SELECT COLUMNS */
 SELECT id, phrase FROM foo
 SELECT * FROM foo
@@ -131,15 +131,15 @@ SELECT * FROM foo WHERE 1 = 0 AND baz < (6*foo+11-r)
   /* CASE OF IDENTIFIERS */
 SELECT ID, phRase FROM tEst AS tE WHERE te.id < 3 ORDER BY TE.phrasE
   /* PARENS */
-SELECT * FROM table WHERE NOT data IN ('one','two')
-SELECT * from table WHERE (aaa > 'AAA')
-SELECT * from table WHERE  sev = 50 OR sev = 60
-SELECT * from table WHERE (sev = 50 OR sev = 60)
-SELECT * from table WHERE sev IN (50,60)
-SELECT * from table WHERE rc > 200 AND ( sev IN(50,60) )
-SELECT * FROM table WHERE data NOT IN ('one','two')
-SELECT * from table WHERE (aaa > 'AAA') AND (zzz < 'ZZZ')
-SELECT * from table WHERE (sev IN(50,60))
+SELECT * FROM ztable WHERE NOT data IN ('one','two')
+SELECT * from ztable WHERE (aaa > 'AAA')
+SELECT * from ztable WHERE  sev = 50 OR sev = 60
+SELECT * from ztable WHERE (sev = 50 OR sev = 60)
+SELECT * from ztable WHERE sev IN (50,60)
+SELECT * from ztable WHERE rc > 200 AND ( sev IN(50,60) )
+SELECT * FROM ztable WHERE data NOT IN ('one','two')
+SELECT * from ztable WHERE (aaa > 'AAA') AND (zzz < 'ZZZ')
+SELECT * from ztable WHERE (sev IN(50,60))
   /* NOT */
 SELECT * FROM foo WHERE NOT bar = 'baz' AND bop = 7 OR NOT blat = bar
 SELECT * FROM foo WHERE NOT bar = 'baz' AND NOT bop = 7 OR NOT blat = bar

@@ -1,5 +1,20 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.005, released 26 October, 2002
+------------------------------------------
+
+ * added support for MySQL-like "DROP TABLE IF EXISTS"
+
+ * fixed bug in dotted column names e.g. tableA.colB
+
+ * fixed bug in MAX and MIN (thanks Michael Kovacs, 
+   mkovacs@turing.une.edu.au)
+
+ * fixed bug in ORDER BY (when col names not in SELECT list)
+   Thanks Janet Goldstein <jgold@cidr.jhmi.edu>
+
+
+
 Version 1.004, released 13 March, 2002
 ------------------------------------------
 

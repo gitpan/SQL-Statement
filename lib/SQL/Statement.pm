@@ -12,8 +12,9 @@ use strict;
 use SQL::Parser;
 use SQL::Eval;
 use vars qw($VERSION $numexp $s2pops $arg_num $dlm);
+#use locale;
 
-$VERSION = '1.004';
+$VERSION = '1.005';
 
 $dlm = '~';
 $arg_num=0;
@@ -56,9 +57,9 @@ sub new {
     my $parser_dialect = $flags->{"dialect"} || 'AnyData';
     $parser_dialect = 'AnyData' if $parser_dialect =~ /^(CSV|Excel)$/;
 
-#    if (!ref($parser) or (ref($parser) and ref($parser) !~ /^SQL::Parser/)) {
-    if (!ref($parser)) {
-        # print "NEW PARSER\n";
+    if (!ref($parser) or (ref($parser) and ref($parser) !~ /^SQL::Parser/)) {
+ #   if (!ref($parser)) {
+#         print "NEW PARSER\n";
         $parser = new SQL::Parser($parser_dialect,$flags);
     }
 #       unless ref $parser and ref $parser =~ /^SQL::Parser/;
@@ -77,6 +78,7 @@ sub new {
 ###endnew
         : qr/^\s*[+-]?\s*\.?\s*\d/;
     }
+#use mylibs; zwarn $self; exit;
     $self->prepare($sql,$parser);
     return $self;
 }
@@ -111,7 +113,7 @@ sub prepare {
        #print $self->command, " [$max_placeholders]\n";
        if ($max_placeholders) {
            for my $i(0..$max_placeholders-1) {
-               SQL::Statement::Param->new($i);
+               $self->{"params"}->[$i] = SQL::Statement::Param->new($i);
            }
        }
        if ($self->{"sort_spec_list"}) {
@@ -159,26 +161,26 @@ sub execute {
     $self->{'params'}= $params;
     my($table, $msg);
     my($command) = $self->command();
-    return undef unless $command;
+    return DBI::set_err($self, 1, 'No command found!') unless $command;
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
-     $self->{'data'}) = $self->$command($data, $params);
+          $self->{'data'}) = $self->$command($data, $params);
     my $tables;
     my $names = $self->{NAME};
     @{$self->{NAME}} = map {
-      my $org = $self->{ORG_NAME}->{$_};
-      $org =~ s/^"//;
-      $org =~ s/"$//;
-      $org =~ s/""/"/g;
-      $org;
+        my $org = $self->{ORG_NAME}->{$_};
+        $org =~ s/^"//;
+        $org =~ s/"$//;
+        $org =~ s/""/"/g;
+        $org;
     } @$names;
     @$tables = map {$_->{"name"}} @{ $self->{"tables"} };
     delete $self->{'tables'};  # Force closing the tables
-      for (@$tables) {
-           push @{ $self->{"tables"} },
-                SQL::Statement::Table->new($_);
-       }
+    for (@$tables) {
+        push @{ $self->{"tables"} }, SQL::Statement::Table->new($_);
+    }
     $self->{'NUM_OF_ROWS'} || '0E0';
 }
+
 
 sub CREATE ($$$) {
     my($self, $data, $params) = @_;
@@ -197,6 +199,14 @@ sub CREATE ($$$) {
 
 sub DROP ($$$) {
     my($self, $data, $params) = @_;
+#use mylibs; zwarn $self; exit;
+    if ($self->{ignore_missing_table}) {
+         undef $@;
+         eval { $self->open_tables($data,0,0) };
+         if ($@ and $@ =~ /no such (table|file)/i ) {
+             return (-1,0);
+	 }
+    }
     my($eval) = $self->open_tables($data, 0, 1);
 #    return undef unless $eval;
     return (-1,0) unless $eval;
@@ -461,14 +471,15 @@ sub JOIN {
     $tableB = shift @tables;
     my $tableAobj = $eval->table($tableA);
     my $tableBobj = $eval->table($tableB);
+#use mylibs; print $tableA; zwarn $tableAobj; exit;
     $tableAobj->{"REAL_NAME"} = $tableAobj->{"NAME"} ||= $tableA;
     $tableBobj->{"REAL_NAME"} = $tableBobj->{"NAME"} ||= $tableB;
     if (my $aliasA = $self->{table_alias}->{$tableA}) {
         $tableAobj->{"NAME"} = shift @{$self->{table_alias}->{$tableA}};
-    } 
+    }
     if (my $aliasB = $self->{table_alias}->{$tableB}) {
-        $tableBobj->{"NAME"} = shift @{$self->{table_alias}->{$tableB}};
-    } 
+        $tableBobj->{"NAME"} =  shift @{$self->{table_alias}->{$tableB}} ;
+    }
 
 #use mylibs; zwarn $self;
 #die "$tableA,$tableB";
@@ -760,7 +771,7 @@ sub SELECT ($$) {
 		  }
 	    }
             $tbl ||= $self->colname2table($col);
-            #print "$tbl~$col\n";
+            #print "$tbl~\n";
             next if exists($columns{$tbl}->{"$col"});
             $pos = $table->column_num($col) unless defined $pos;
             push(@extraSortCols, $pos);
@@ -908,19 +919,28 @@ sub SELECT ($$) {
                 next unless defined $v;
                 my $final = $final_row[$sf_index];
                 $final++      if $name =~ /COUNT/;
-                $final += $v  if $name =~ /SUM|AVG/;
+#                $final += $v  if $name =~ /SUM|AVG/;
+                if( $name =~ /SUM|AVG/) {
+                    return $self->do_err("Can't use $name on a string!")
+                      unless $v =~ $numexp;
+                    $final += $v;
+                }
                 #
                 # Thanks Dean Kopesky dean.kopesky@reuters.com
                 # submitted patch to make MIN/MAX do cmp on strings
                 # and == on numbers
                 #
-                $final  = $v  if !defined $final
+                # but thanks also to Michael Kovacs mkovacs@turing.une.edu.au
+                # for catching a problem when a MAX column is 0
+                # necessitating !$final instead of ! defined $final
+                #
+                $final  = $v  if !$final
                               or ( $name eq 'MAX'
                                    and $v
                                    and $final
                                    and anycmp($v,$final) > 0
                                  );
-                $final  = $v  if !defined $final
+                $final  = $v  if !$final
                               or ( $name eq 'MIN' 
                                    and defined $v
                                    and anycmp($v,$final) < 0
@@ -1065,7 +1085,7 @@ sub is_matched {
     if ($op =~ /LIKE|CLIKE/i) {
         $val2 = quotemeta($val2);
         $val2 =~ s/\\%/.*/g;
-        $val2 =~ s/_/?/g;
+        $val2 =~ s/_/./g;
     }
     if ( !$self->{"alpha_compare"} && $op =~ /lt|gt|le|ge/ ) {
         return 0;
@@ -1092,32 +1112,32 @@ sub open_tables {
     my($self, $data, $createMode, $lockMode) = @_;
     my @call = caller 4;
     my $caller = $call[3];
-    $caller =~ s/^([^:]*::[^:]*)::.*$/$1/;
+    if ($caller) {
+        $caller =~ s/^([^:]*::[^:]*)::.*$/$1/;
+    }
     my @c;
     my $t;
     my $is_col;
     my @tables = $self->tables;
+    my $count=-1;
     for ( @tables) {
+        $count++;
         my $name = $_->{"name"};
         undef $@;
-         eval{
-    ## statement change
-    #           $t->{"$name"} =
-    #              $self->open_table($data, $name, $createMode, $lockMode);
-        my $open_name = $name;
-#        $open_name =~ s/^"(.+)"$/$1/;
-#$name = lc $name;
+        eval{
+            my $open_name = $name;
+            $open_name = $self->{org_table_names}->[$count];
+#print "[$topen_name]";
            if ($caller && $caller =~ /^DBD::AnyData/) {
                $caller .= '::Statement' if $caller !~ /::Statement/;
-               $t->{"$name"} = $caller->open_table($data, $open_name, $createMode,
-                                              $lockMode);
+               $t->{"$name"} = $caller->open_table($data, $open_name,
+                                                   $createMode, $lockMode);
 	   }
            else {
-               $t->{"$name"} = $self->open_table($data, $open_name, $createMode, 
-                                               $lockMode);
+               $t->{"$name"} = $self->open_table($data, $open_name,
+                                                 $createMode, $lockMode);
 	   }
 
-    ####
 	};
         my $err = $t->{"$name"}->{errstr};
         return $self->do_err($err) if $err;
@@ -1160,7 +1180,9 @@ $t->{"$name"}->{"col_names"} = \@cnames;
 	}
         @c = ( @c, @newcols );
     }
-#use mylibs; zwarn $t->{test}->{org_cols};
+    my $all_cols = $self->{all_cols} || [];
+    @$all_cols = (@$all_cols,@c);
+    $self->{all_cols} = $all_cols;
     return SQL::Eval->new({'tables' => $t}), \@c;
 }
 
@@ -1181,7 +1203,8 @@ sub verify_columns {
 ###z
     for my $c(@tmpcols) {
        if ($c->{"name"} eq '*' and defined $c->{"table"}) {
-
+          return $self->do_err("Can't find table ". $c->{"table"})
+              unless $eval->{"tables"}->{$c->{"table"}};
           my $tcols = $eval->{"tables"}->{$c->{"table"}}->col_names;
 # @$tcols = map{lc $_} @$tcols ;
           return $self->do_err("Couldn't find column names!")
@@ -1202,8 +1225,10 @@ sub verify_columns {
     @tmpcols = map {$_->{name}} @$usr_cols;
 #     @tmpcols = map {lc $_->{name}} @$usr_cols;
     my $fully_qualified_cols=[];
+
     my %col_exists   = map {$_=>1} @tmp_cols;
-#    my %col_exists   = map {lc $_=>1} @tmp_cols;
+
+
     my %short_exists = map {s/^([^.]*)\.(.*)/$1/; $2=>$1} @tmp_cols;
     my(%is_member,@duplicates,%is_duplicate);
     @duplicates = map {s/[^.]*\.(.*)/$1/; $_} @$all_cols;
@@ -1230,6 +1255,7 @@ sub verify_columns {
           $table = $table->name;
        }
 ###endnew
+#print "Content-type: text/html\n\n"; print $self->command; print "$col!!!<p>";
        if ( $col eq '*' and $num_tables == 1) {
           $table ||= $self->tables->[0]->{"name"};
           if (ref $table eq 'SQL::Statement::Table') {
@@ -1290,7 +1316,7 @@ sub verify_columns {
                return $self->do_err("Ambiguous column name '$c'")
                    if $is_duplicate{$c};
                return $self->do_err("No such column '$c'")
-               unless $short_exists{"$c"};
+                      unless $short_exists{"$c"} or ($c !~ /^"/ and $short_exists{"\U$c"});
                $table = $short_exists{"$c"};
                $col   = $c;
            }
@@ -1303,10 +1329,12 @@ sub verify_columns {
 #print qq/$table."$col"/;
 # use mylibs; zwarn $self->{ORG_NAME};
 	     }
-             
+#use mylibs; zwarn \%col_exists;
+#print "<$table . $col>";
                return $self->do_err("No such column '$table.$col'")
 #                     unless $col_exists{"\L$table.$col"};
                      unless $col_exists{"$table.$col"}
+                      or $col_exists{"\L$table.".$col};
 ;#                         or $col_exists{qq/$table."/.$self->{ORG_NAME}->{$col}.qq/"/}
 ;
            }
@@ -1326,7 +1354,8 @@ sub verify_columns {
               $self->{"columns"} = \@newcols;
        }
     }
-#use mylibs; zwarn $self->{columns};
+#use mylibs; zwarn $fully_qualified_cols;
+
     return $fully_qualified_cols;
 }
 
@@ -1461,7 +1490,9 @@ sub get_row_value {
         /SUBSTRING/                   &&do {
                 my $start  = $structure->{"start"}->{"value"} || 1;
                 my $offset = $structure->{"length"}->{"value"} || length $value;
-                return substr($value,$start-1,$offset);
+                $value ||= '';
+                return substr($value,$start-1,$offset)
+                   if length $value >= $start-2+$offset;
         };
     }
 }
@@ -1486,12 +1517,28 @@ sub colname2table {
     my $self = shift;
     my $col_name = shift;
     return undef unless defined $col_name;
+    my $found_table;
+    for my $full_col(@{$self->{all_cols}}) {
+        my($table,$col) = $full_col =~ /^(.+)\.(.+)$/;
+        next unless $col eq $col_name;
+        $found_table = $table;
+        last;
+    }
+    return $found_table;
+}
+
+sub colname2tableOLD {
+    my $self = shift;
+    my $col_name = shift;
+    return undef unless defined $col_name;
     my $found;
     my $table;
     my $name;
     my @cur_cols;
+print "<$col_name>";
     for my $c(@{$self->{"columns"}}) {
          $name  = $c->{"name"};
+print "[$name]\n";
          $table = $c->{"table"};
          push @cur_cols,$name;
          next unless $name eq $col_name;
@@ -1632,7 +1679,8 @@ sub do_err {
     $self->{"errstr"} = $err;
     warn $err if $self->{"PrintError"};
     # print $err if $self->{"PrintError"};
-    die "\n" if $self->{"RaiseError"};
+#    die "\n" if $self->{"RaiseError"};
+    die "$err" if $self->{"RaiseError"};
     return undef;
 }
 
@@ -1668,7 +1716,13 @@ sub col_nums { shift->{"col_nums"} }
 sub col_names { shift->{"col_names"} }
 sub column_num  { 
     my($s,$col) = @_;
-    $col = $s->{"col_nums"}->{"$col"};
+    my $new_col = $s->{"col_nums"}->{"$col"};
+    if (! defined $new_col) {
+        my @tmp = split '~',$col;
+        $new_col = lc($tmp[0]) . '~' . uc($tmp[1]);
+        $new_col = $s->{"col_nums"}->{"$new_col"};
+    }
+    return $new_col
 }
 sub fetch_row { my $s=shift; return shift @{ $s->{"table"} } }
 
