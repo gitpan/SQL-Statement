@@ -13,7 +13,7 @@ use SQL::Parser;
 use SQL::Eval;
 use vars qw($VERSION $numexp $s2pops $arg_num $dlm);
 
-$VERSION = '1.0';
+$VERSION = '1.001';
 
 $dlm = '~';
 $arg_num=0;
@@ -291,7 +291,7 @@ sub UPDATE ($$$) {
                     $val = $eval->param($val->num());
                 }
                 else {
-                    $val = $self->get_row_value($val) unless defined $val;
+                    $val = $self->get_row_value($val);
 		}
                 $array->[$table->column_num($col->name())] = $val;
             }

@@ -1,11 +1,22 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.001, released January 17,2002
+---------------------------------------
+
+Fixed bug in UPDATE that caused the new value to be a hash rather than
+a scalar.
+
 Version 1.0, released January 15, 2002
 --------------------------------------
 
-This is the first CPAN release of the pure perl version of the module.  It was previously released in an XS version by Jochen Wiedman who has turned over maintenance of it to me.
+This is the first CPAN release of the pure perl version of the module.
+It was previously released in an XS version by Jochen Wiedman who has
+turned over maintenance of it to me.
 
-The new Pure Perl version of SQL::Statement supports everything supported by the XS version and, additionally, at least partial support for the following features that are not supported at all by the XS version:
+The new Pure Perl version of SQL::Statement supports everything
+supported by the XS version and, additionally, at least partial
+support for the following features that are not supported at all by
+the XS version:
 
  * Explicit and implicit joins
  * Table name aliases
@@ -18,3 +29,4 @@ The new Pure Perl version of SQL::Statement supports everything supported by the
  * Alphabetic comparison in WHERE clauses
  * Ordering of text that looks like a number
  * Verbose error messages for both Parsing and Execution errors
+
