@@ -43,16 +43,28 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 
     switch(type) {
       case SQL_STATEMENT_TYPE_INTEGER:
-        return newSViv(((sql_val_t*) obj)->data.i);
+	result = newSViv(((sql_val_t*) obj)->data.i);
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("TYPE_INTEGER: Returning %08lx\n", (unsigned long) result);
+#endif
+        return result;
       case SQL_STATEMENT_TYPE_REAL:
-	return newSVnv(((sql_val_t*) obj)->data.d);
+	result = newSVnv(((sql_val_t*) obj)->data.d);
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("TYPE_REAL: Returning %08lx\n", (unsigned long) result);
+#endif
+	return result;
       case SQL_STATEMENT_TYPE_STRING:
 	{
 	    sql_string_t* str = &((sql_val_t*) obj)->data.str;
 	    if (!(str->pPtr = SQL_Statement_PPtr(str))) {
 	        croak("Out of memory");
 	    }
-	    return newSVpv(str->pPtr, str->pLen);
+	    result = newSVpv(str->pPtr, str->pLen);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_STRING: Returning %08lx\n", (unsigned long) result);
+#endif
+	    return result;
 	}
       case SQL_STATEMENT_TYPE_IDENT:
 	{
@@ -60,7 +72,10 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    sql_ident_t* id = &((sql_val_t*) obj)->data.id;
 	    hv_store(hv, "id", 2, newSVpv(id->ptr, id->len), 0);
 	    bless_package = "SQL::Statement::Ident";
-	    result = newRV((SV*) hv);
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_IDENT: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
       default:
@@ -77,6 +92,9 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    hv_store(hv, "stmt", 4, stmtSV, 0);
 	    bless_package = "SQL::Statement::Op";
 	    result = newRV((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_OP: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
       case SQL_STATEMENT_TYPE_COLUMN:
@@ -105,7 +123,10 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    }
 	    hv_store(hv, "column", 6, sv, 0);
 	    bless_package = "SQL::Statement::Column";
-	    result = newRV((SV*) hv);
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_COLUMN: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
       case SQL_STATEMENT_TYPE_TABLE:
@@ -115,7 +136,10 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    hv_store(hv, "table", 5, newSVpv(val->data.tbl.table.ptr,
 					     val->data.tbl.table.len), 0);
 	    bless_package = "SQL::Statement::Table";
-	    result = newRV((SV*) hv);
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_TABLE: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
       case SQL_STATEMENT_TYPE_VAL:
@@ -125,7 +149,10 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    HV* hv = newHV();
 	    hv_store(hv, "num", 3, newSViv(((sql_val_t*) obj)->data.p.num), 0);
 	    bless_package = "SQL::Statement::Param";
-	    result = newRV((SV*) hv);
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_PARAM: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
       case SQL_STATEMENT_TYPE_ORDER:
@@ -138,7 +165,10 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 			       SQL_STATEMENT_TYPE_COLUMN), 0);
 	    hv_store(hv, "desc", 4, newSViv(o->desc), 0);
 	    bless_package = "SQL::Statement::Order";
-	    result = newRV((SV*) hv);
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_ORDER: Returning %08lx\n", (unsigned long) result);
+#endif
 	    break;
 	}
     }
@@ -153,6 +183,11 @@ static int EvalColumn(sql_stmt_t* stmt, sql_val_t* c, sql_cache_t* val) {
     SV* table = newSVpv(c->data.col.table.ptr, c->data.col.table.len);
     SV* column = newSVpv(c->data.col.column.ptr, c->data.col.column.len);
     dSP;
+
+#ifdef DEBUGGING_MEMORY_LEAK
+    printf("EvalColumn: table = %08lx, column = %08lx\n",
+	   (unsigned long) table, (unsigned long) column);
+#endif
 
     PUSHMARK(sp);
     XPUSHs(((my_eval_data_t*) stmt->evalData)->eval_object);
@@ -267,9 +302,9 @@ new(self, statement, parser=NULL)
 
 	hv = newHV();
 	hv_store(hv, "stmt", 4, newSViv((IV)stmt), 0);
-	hv_store(hv, "statement", 6, statement, 0);
-	hv_store(hv, "params", 6, newRV((SV*) newAV()), 0);
-	rv = newRV((SV*) hv);
+	hv_store(hv, "statement", 6, SvREFCNT_inc(statement), 0);
+	hv_store(hv, "params", 6, newRV_noinc((SV*) newAV()), 0);
+	rv = newRV_noinc((SV*) hv);
 	if (SvROK(self)) {
 	    stash = SvSTASH(SvRV(self));
 	} else {
@@ -305,6 +340,9 @@ command(self)
 	    XSRETURN_UNDEF;
 	}
 	RETVAL = newSVpv(command, 0);
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("command: Returning %08lx\n", (unsigned long) command);
+#endif
     }
   OUTPUT:
     RETVAL
@@ -334,6 +372,9 @@ columns(self, column=NULL)
 					 ((sql_val_t*) stmt->values.data)
 					 + col->column,
 					 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("columns: Returning %08lx\n", (unsigned long) ST(0));
+#endif
 	    XSRETURN(1);
 	}
 	/*
@@ -353,6 +394,9 @@ columns(self, column=NULL)
 						 ((sql_val_t*) stmt->values.data)
 						 + (col++)->column,
 						 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+		    printf("columns: Returning %08lx\n", (unsigned long) ST(i));
+#endif
 		}
 		XSRETURN(num);
 	    }
@@ -389,6 +433,9 @@ row_values(self, rval=NULL)
 	    ST(0) = sv_2mortal(SqlObject(self, stmt,
 					 ((sql_val_t*) stmt->values.data) + rv->val,
 					 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("row_values: Returning %08lx\n", (unsigned long) ST(0));
+#endif
 	    XSRETURN(1);
 	}
 	/*
@@ -412,6 +459,9 @@ row_values(self, rval=NULL)
 						     + (rv++)->val,
 						     SQL_STATEMENT_TYPE_VAL));
 		    }
+#ifdef DEBUGGING_MEMORY_LEAK
+		    printf("row_values: Returning %08lx\n", (unsigned long) ST(i));
+#endif
 		}
 		XSRETURN(num);
 	    }
@@ -446,6 +496,9 @@ tables(self, table=NULL)
 					 ((sql_val_t*) stmt->values.data)
 					 + tbl->table,
 					 SQL_STATEMENT_TYPE_TABLE));
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("tables: Returning %08lx\n", (unsigned long) ST(0));
+#endif
 	    XSRETURN(1);
 	}
 
@@ -467,6 +520,9 @@ tables(self, table=NULL)
 						  stmt->values.data)
 						 + (tl++)->table,
 						 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+		    printf("tables: Returning %08lx\n", (unsigned long) ST(i));
+#endif
 		}
 		XSRETURN(num);
 	    }
@@ -539,6 +595,9 @@ where(self)
 	RETVAL = SqlObject(self, stmt,
 			   ((sql_val_t*) stmt->values.data)+stmt->where,
 			   SQL_STATEMENT_TYPE_VAL);
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("where: Returning %08lx\n", (unsigned long) ST(0));
+#endif
     }
   OUTPUT:
     RETVAL
@@ -555,6 +614,9 @@ op(class, op)
 	if (!o) {
 	    XSRETURN_UNDEF;
 	}
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("op: Returning %08lx\n", (unsigned long) ST(0));
+#endif
 	RETVAL = newSVpv(o, 0);
     }
   OUTPUT:
@@ -578,6 +640,9 @@ val(self, num=NULL)
 	    ST(0) = sv_2mortal(SqlObject(self, stmt,
 					 ((sql_val_t*) stmt->values.data)+i,
 					 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("val: Returning %08lx\n", (unsigned long) ST(0));
+#endif
 	    XSRETURN(1);
 	}
 	switch (GIMME_V) {
@@ -593,6 +658,9 @@ val(self, num=NULL)
 		for (i = 0;  i < num;  i++) {
 		    ST(i) = sv_2mortal(SqlObject(self, stmt, val++,
 						 SQL_STATEMENT_TYPE_VAL));
+#ifdef DEBUGGING_MEMORY_LEAK
+		    printf("val: Returning %08lx\n", (unsigned long) ST(i));
+#endif
 		}
 		XSRETURN(num);
 	    }
@@ -616,6 +684,13 @@ eval_where(self, evalObject)
 	myed.ed.eParam = EvalParam;
 	myed.ed.eColumn = EvalColumn;
 	myed.eval_object = evalObject;
+#ifdef DEBUGGING_MEMORY_LEAK
+	printf("eval_where: EvalParam = %08lx, EvalColumn = %08lx, EvalObject = %08lx\n",
+	       (unsigned long) myed.ed.eParam,
+	       (unsigned long) myed.ed.eColumn,
+	       myed.eval_object);
+#endif
+
 	stmt->evalData = (sql_eval_data_t*) &myed;
 	if ((result = SQL_Statement_EvalWhere(stmt))  ==  -1) {
 	    croak("Internal error in evaluation: %s",
@@ -668,7 +743,7 @@ dup(class, name=NULL)
 	}
 	New(1000, dup, 1, sql_parser_t);
 	Copy(parser, dup, 1, sql_parser_t);
-	RETVAL = sv_bless(newRV(newSViv((IV) dup)), stash);
+	RETVAL = sv_bless(newRV_noinc(newSViv((IV) dup)), stash);
     }
   OUTPUT:
     RETVAL

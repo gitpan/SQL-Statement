@@ -1,3 +1,17 @@
+1998-08-31  Jochen Wiedmann  <joe@ispsoft.de> (0.1007)
+
+	* Makefile.PL: Added ABSTRACT_FROM, AUTHOR and CAPI.
+	* Statement.xs: Partial fix of memory leaks by changing
+	  newRV() to newRV_noinc(). Some leaks are still remaining,
+	  though. :-(
+
+1998-08-29  Jochen Wiedmann  <joe@ispsoft.de> (0.1006)
+
+	* lib/SQL/Statement.pm (UPDATE): Fixed a bug in the parameter
+	  handling.
+	* Statement.xs (new): Added a missing REFCNT_inc on
+	  $self->{'statement'}
+
 1998-07-23  Jochen Wiedmann  <joe@ispsoft.de> (0.1005)
 
 	* sql_data.h: Added "#define NULL" for SunOS 4.

@@ -2,27 +2,40 @@
 
 require 5.004;
 use strict;
+use Config;
 
 require ExtUtils::MakeMaker;
 
 
-my($defines) = '';
-if ($ENV{'USER'} eq 'joe'  &&  $ENV{'HOSTNAME'} eq 'laptop.ispsoft.de') {
-    $defines = '-Wall -Wstrict-prototypes';
-}
-if ($^O =~ /win/i) {
-    $defines .= " -Dalloca=_alloca";
-}
-ExtUtils::MakeMaker::WriteMakefile(
-    'NAME' => 'SQL::Statement',
-    'VERSION_FROM' => 'lib/SQL/Statement.pm',
+my %opts =
+    ('NAME' => 'SQL::Statement',
+     'VERSION_FROM' => 'lib/SQL/Statement.pm',
      'dist'         => { 'SUFFIX'       => ".gz",
 			 'DIST_DEFAULT' => 'all tardist',
 			 'COMPRESS'     => "gzip -9f" },
-    'C' => ['sql_yacc.c sql_data.c sql_op.c'],
-    'OBJECT' => 'sql_yacc.o sql_data.o sql_op.o Statement.o',
-    ($defines ? ('DEFINE' => $defines) : ()),
-);
+     'C' => ['sql_yacc.c sql_data.c sql_op.c'],
+     'OBJECT' => 'sql_yacc.o sql_data.o sql_op.o Statement.o'
+     );
+
+if ($ENV{'USER'} eq 'joe'  &&  $ENV{'HOSTNAME'} eq 'laptop.ispsoft.de') {
+    $opts{'DEFINE'} = '-Wall -Wstrict-prototypes';
+} else {
+    $opts{'DEFINE'} = '';
+}
+if ($^O =~ /win/i) {
+    $opts{'DEFINE'} .= " -Dalloca=_alloca";
+}
+
+if ($ExtUtils::MakeMaker::VERSION >= 5.43) {
+    $opts{'ABSTRACT_FROM'} = 'lib/SQL/Statement.pm';
+    $opts{'AUTHOR'} = 'Jochen Wiedmann (joe@ispsoft.de)';
+    if ($] >= 5.005 && $^O eq 'MSWin32' &&
+        $Config{archname} =~ /-object\b/i) {
+	$opts{'CAPI'} = 'TRUE';
+    }
+}
+
+ExtUtils::MakeMaker::WriteMakefile(%opts);
 
 
 package MY;
