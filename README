@@ -1,5 +1,10 @@
 README FILE FOR MODULES SQL::Statement and SQL::Parser
 
+These modules can be used stand-alone to parse SQL statements 
+or used with DBI and DBD::CSV, DBD::AnyData or other drivers to
+create, modify, and query data in many kinds of formats including
+XML, CSV, Fixed Length, Excel Spreadsheets and many others.
+
 WHO NEEDS IT?
 
 If you use the DBI drivers for flatfiles, Excel spreadsheets, or
@@ -7,19 +12,9 @@ formats such as XML via the CSV, AnyData, or Excel DBDs, this
 distribution will greatly expand the range of supported SQL, as
 well as provide support for text-like numbers and alphabetic
 comparisons previously missing in those drivers.  Some of the
-features included for the first time in this release are partial
-support for multi-table joins, for set and string functions, for
-numeric expressions, for the IN and BETWEEN predicates and much
-more.
-
-WHAT IS IT?
-
-The SQL::Statement and SQL::Parser modules are primarily
-intended as a means to provide a SQL engine for DBI drivers such
-as DBD::CSV, DBD::AnyData, and DBD::Excel.  In addition, they
-can be used to validate a limited subset of SQL statements, or
-as a subclassable base for other modules needing SQL
-capabilities.
+features included in this release are partial support for
+multi-table joins, for set and string functions, for numeric
+expressions, for the IN and BETWEEN predicates and much more.
 
 HOW DO I INSTALL IT?
 
@@ -36,6 +31,19 @@ are pure perl, you may also simply copy the enclosed SQL
 directory into your lib directory (either your main site/lib or
 a private area).
 
+WHAT ELSE DO I NEED?
+
+  to parse SQL statements:
+
+     perl
+
+  to create, query, & modify databases
+
+     perl
+     DBI
+     DBD::CSV or DBD::AnyData
+
+        
 WHERE DO I FIND OUT MORE?
 
 If you are using it via one of the DBD drivers, see the help

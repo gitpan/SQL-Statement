@@ -12,7 +12,7 @@ package SQL::Parser;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '1.003';
+$VERSION = '1.004';
 
 
 #############################
@@ -23,8 +23,8 @@ sub new {
     my $class   = shift;
     my $dialect = shift || 'ANSI';
     $dialect = 'ANSI'    if uc $dialect eq 'ANSI';
-    $dialect = 'AnyData' if uc $dialect eq 'ANYDATA';
-    $dialect = 'CSV'     if uc $dialect eq 'CSV';
+    $dialect = 'AnyData' if uc $dialect eq 'ANYDATA' or uc $dialect eq 'CSV';
+#    $dialect = 'CSV'     if uc $dialect eq 'CSV';
     if ($dialect eq 'SQL::Eval') {
        $dialect = 'AnyData';
     }
@@ -47,17 +47,29 @@ sub parse {
     $self->{"struct"} = {};
     $self->{"tmp"} = {};
     $self->{"original_string"} = $sql;
-    # comment out lines 48,49,50,51
-    # insert these lines after line 51:
-    #    my $comment_re = $self->{"comment_re"} || qr/--.*(\n|$)/;
-    my $comment_re = $self->{"comment_re"} || '\/\*.*?\*\/';
+
+    ################################################################
+    #
+    # COMMENTS
+
+    # C-STYLE
+    #
+    my $comment_re = $self->{"comment_re"} || '(\/\*.*?\*\/)';
     $self->{"comment_re"} = $comment_re;
     my $starts_with_comment;
-    if ($sql =~ /^\s*($comment_re)(.*)$/s) {
+    if ($sql =~ /^\s*$comment_re(.*)$/s) {
        $self->{"comment"} = $1;
        $sql = $2;
        $starts_with_comment=1;
-    } 
+    }
+    # SQL STYLE
+    #
+    if ($sql =~ /^\s*--(.*)(\n|$)/) {
+       $self->{"comment"} = $1;
+       return 1;
+    }
+    ################################################################
+
     $sql = $self->clean_sql($sql);
     my($com) = $sql =~ /^\s*(\S+)\s+/s ;
     if (!$com) {
@@ -77,6 +89,7 @@ sub parse {
          ) {
             delete $self->{"struct"}->{"join"};
 	}
+        $self->replace_quoted_ids();
         return $rv;
     } 
     else {
@@ -84,7 +97,31 @@ sub parse {
     }
 }
 
+sub replace_quoted_ids {
+    my $self = shift;
+    my $id = shift;
+    return $id unless $self->{struct}->{quoted_ids};
+    if ($id) {
+      if ($id =~ /^\?QI(\d+)\?$/) {
+        return '"'.$self->{struct}->{quoted_ids}->[$1].'"';
+      } 
+      else {
+	return $id;
+      }
+    }
+    my @tables = @{$self->{struct}->{table_names}};
+    for my $t(@tables) {
+        if ($t =~ /^\?QI(.+)\?$/ ) {
+            $t = '"'.$self->{struct}->{quoted_ids}->[$1].'"';
+#            $t = $self->{struct}->{quoted_ids}->[$1];
+        }
+    }
+    $self->{struct}->{table_names} = \@tables;
+    delete $self->{struct}->{quoted_ids};
+}
+
 sub structure { shift->{"struct"} }
+sub command { my $x = shift->{"struct"}->{command} || '' }
 
 sub feature {
     my($self,$opt_class,$opt_name,$opt_value) = @_;
@@ -197,6 +234,7 @@ sub DROP {
 
     }
     return undef unless $self->TABLE_NAME($table_name);
+    $table_name = $self->replace_quoted_ids($table_name);
     $self->{"tmp"}->{"is_table_name"}  = {$table_name => 1};
     $self->{"struct"}->{"table_names"} = [$table_name];
     return 1;
@@ -501,6 +539,9 @@ sub CREATE {
             return $self->do_err( "Column definition is missing a data type!" );
 	}
         return undef if !($self->IDENTIFIER($name));
+#        if ($name =~ /^\?QI(.+)\?$/ ) {
+            $name = $self->replace_quoted_ids($name);
+#        }
         $constraints =~ s/^\s+//;
         $constraints =~ s/\s+$//;
         if ($constraints) {
@@ -597,6 +638,7 @@ sub SELECT_LIST {
         if ($col =~ /^(\S+)\.\*$/) {
             my $table = $1;
             return undef unless $self->TABLE_NAME($table);
+            $table = $self->replace_quoted_ids($table);
             push @newcols, "$table.*";
         }
         else {
@@ -625,6 +667,9 @@ sub SET_FUNCTION_SPEC {
             my $ok = $self->COLUMN_NAME($set_function_arg)
                      if !$count_star;
             return undef if !$count_star and !$ok;
+	    if ($set_function_arg !~ /^"/) {
+                $set_function_arg = uc $set_function_arg;
+	    } 
             push @{ $self->{"struct"}->{'set_function'}}, {
                 name     => $set_function_name,
                 arg      => $set_function_arg,
@@ -700,7 +745,13 @@ sub SORT_SPEC_LIST {
             return undef if !($newcol = $self->COLUMN_NAME($newcol));
             if ($newcol =~ /^(.+)\..+$/s ) {
               my $table = $1;
-	      if (!$is_table_name{"\L$table"} and !$is_table_alias{"\L$table"} ) {
+              if ($table =~ /^'/) {
+	          if (!$is_table_name{"$table"} and !$is_table_alias{"$table"} ) {
+                return $self->do_err( "Table '$table' in ORDER BY clause "
+                             . "not in FROM clause."
+                             );
+	      }}
+	      elsif (!$is_table_name{"\L$table"} and !$is_table_alias{"\L$table"} ) {
                 return $self->do_err( "Table '$table' in ORDER BY clause "
                              . "not in FROM clause."
                              );
@@ -999,7 +1050,7 @@ sub LITERAL {
     my $self = shift;
     my $str  = shift;
     return 'null' if $str =~ /^NULL$/i;    # NULL
-    return 'empty_string' if $str =~ /^~E~$/i;    # NULL
+#    return 'empty_string' if $str =~ /^~E~$/i;    # NULL
     if ($str eq '?') {
           $self->{struct}->{num_placeholders}++;
           return 'placeholder';
@@ -1239,10 +1290,11 @@ sub ROW_VALUE {
     #
     if ( $type = $self->LITERAL($str) ) {
         undef $str if $type eq 'null';
-        if ($type eq 'empty_string') {
-           $str = '';
-           $type = 'string';
-	} 
+#        if ($type eq 'empty_string') {
+#           $str = '';
+#           $type = 'string';
+#	} 
+        $str = '' if $str and $str eq q('');
         return { type => $type, value => $str };
     }
 
@@ -1270,6 +1322,7 @@ sub ROW_VALUE {
 ###############################################
 # COLUMN NAME ::= [<table_name>.] <identifier>
 ###############################################
+
 sub COLUMN_NAME {
     my $self   = shift;
     my $str = shift;
@@ -1284,7 +1337,18 @@ sub COLUMN_NAME {
 #      $table_name = shift @$alias if $alias;
 #print "$table_name : $alias";
       return undef unless $self->TABLE_NAME($table_name);
-      if (!$self->{"tmp"}->{"is_table_name"}->{"\L$table_name"}
+      $table_name = $self->replace_quoted_ids($table_name);
+      my $ref;
+      if ($table_name =~ /^"/) { #"
+          if (!$self->{"tmp"}->{"is_table_name"}->{"$table_name"}
+          and !$self->{"tmp"}->{"is_table_alias"}->{"$table_name"}
+         ) {
+          $self->do_err(
+                "Table '$table_name' referenced but not found in FROM list!"
+          );
+          return undef;
+      } }
+      elsif (!$self->{"tmp"}->{"is_table_name"}->{"\L$table_name"}
        and !$self->{"tmp"}->{"is_table_alias"}->{"\L$table_name"}
          ) {
           $self->do_err(
@@ -1302,10 +1366,24 @@ sub COLUMN_NAME {
     return undef unless $col_name eq '*' or $self->IDENTIFIER($col_name);
 #
 # MAKE COL NAMES ALL LOWER CASE
-    $col_name = lc $col_name;
+    my $orgcol = $col_name;
+    if ($col_name =~ /^\?QI(\d+)\?$/) {
+        $col_name = $self->replace_quoted_ids($col_name);
+    }
+    else {
+#      $col_name = lc $col_name;
+      $col_name = uc $col_name;
+    } 
+    $self->{struct}->{ORG_NAME}->{$col_name} = $orgcol;
 #
 #
-    $col_name = "$table_name.$col_name" if $table_name;
+    if ($table_name) {
+       my $alias = $self->{tmp}->{is_table_alias}->{"\L$table_name"};
+#use mylibs; print "$table_name"; zwarn $self->{tmp}; exit;
+       $table_name = $alias if defined $alias;
+$table_name = uc $table_name;
+       $col_name = "$table_name.$col_name";
+    }
     return $col_name;
 }
 
@@ -1364,19 +1442,27 @@ sub TABLE_NAME_LIST {
 	    return $self->do_err("Can't find table names in FROM clause!")
 	}
         return undef unless $self->TABLE_NAME($table);
+        $table = $self->replace_quoted_ids($table);
         push @tables, $table;
         if ($alias) {
 #die $alias, $table;
             return undef unless $self->TABLE_NAME($alias);
+            $alias = $self->replace_quoted_ids($alias);
+            if ($alias =~ /^"/) {
+                push @{$aliases{$table}},"$alias";
+                $is_table_alias{"$alias"}=$table;
+	    }
+            else {
+                push @{$aliases{$table}},"\L$alias";
+                $is_table_alias{"\L$alias"}=$table;
+	    }
 #            $aliases{$alias} = $table;
-            push @{$aliases{$table}},"\L$alias";
-            $is_table_alias{"\L$alias"}=1;
 	}
     }
     
 #    my %is_table_name = map { $_ => 1 } @tables,keys %aliases;
     my %is_table_name = map { lc $_ => 1 } @tables;
-    my %is_table_aliase = map { lc $_ => 1 } @tables;
+    #%is_table_alias = map { lc $_ => 1 } @aliases;
     $self->{"tmp"}->{"is_table_alias"}  = \%is_table_alias;
     $self->{"tmp"}->{"is_table_name"}  = \%is_table_name;
     $self->{"struct"}->{"table_names"} = \@tables;
@@ -1411,7 +1497,10 @@ sub TABLE_NAME {
 sub IDENTIFIER {
     my $self = shift;
     my $id   = shift;
-    return 1 if $id =~ /^".+"$/s; # QUOTED IDENTIFIER
+    if ($id =~ /^\?QI(.+)\?$/ ) {
+        return 1;
+    }
+    return 1 if $id =~ /^".+?"$/s; # QUOTED IDENTIFIER
     my $err  = "Bad table or column name '$id' ";        # BAD CHARS
     if ($id =~ /\W/) {
         $err .= "has chars not alphanumeric or underscore!";
@@ -1520,10 +1609,19 @@ sub clean_sql {
 #    if ($sql =~ s/^(.*,\s*)''(\s*[,\)].*)$/${1}NULL$2/g ) {
 #    }
 #    $sql =~ s/^([^\\']+?)''(.*)$/${1} NULL $2/g;
-     $sql =~ s/([^\\]+?)''/$1 ~E~ /g;
+
+    # $sql =~ s/([^\\]+?)''/$1 ~E~ /g;
+
  #       print "$sql\n";
 ###newend
-    $sql =~ s~'(([^'$e]|$e.)+)'~push(@$fields,$1);$i++;"?$i?"~ge;
+
+#    $sql =~ s~'(([^'$e]|$e.)+)'~push(@$fields,$1);$i++;"?$i?"~ge;
+     $sql =~ s~'(([^'$e]|$e.|'')+)'~push(@$fields,$1);$i++;"?$i?"~ge;
+
+#     $sql =~ s/([^\\]+?)''/$1 ~E~ /g;
+     #print "<$sql>";
+     @$fields = map { s/''/\\'/g; $_ } @$fields;
+
 ###new
 #    if ( $sql =~ /'/) {
     if ( $sql =~ tr/[^\\]'// % 2 == 1 ) {
@@ -1536,14 +1634,32 @@ sub clean_sql {
         die "Mismatched single quote: '$sql\n";
     }
     @$fields = map { s/$e'/'/g; s/^'(.*)'$/$1/; $_} @$fields;
+    $self->{"struct"}->{"literals"} = $fields;
+
+    my $qids;
+    $i=-1;
+    $e = q/""/;
+#    $sql =~ s~"(([^"$e]|$e.)+)"~push(@$qids,$1);$i++;"?QI$i?"~ge;
+    $sql =~ s~"(([^"]|"")+)"~push(@$qids,$1);$i++;"?QI$i?"~ge;
+    #@$qids = map { s/$e'/'/g; s/^'(.*)'$/$1/; $_} @$qids;
+    $self->{"struct"}->{"quoted_ids"} = $qids if $qids;
+
 #    $sql =~ s~'(([^'\\]|\\.)+)'~push(@$fields,$1);$i++;"?$i?"~ge;
 #    @$fields = map { s/\\'/'/g; s/^'(.*)'$/$1/; $_} @$fields;
 #print "$sql [@$fields]\n";# if $sql =~ /SELECT/;
 
 ## before line 1511
     my $comment_re = $self->{"comment_re"};
-    if ( $sql =~ s/($comment_re)//gs) {
-       $self->{"comment"} = $1;
+#    if ( $sql =~ s/($comment_re)//gs) {
+#       $self->{"comment"} = $1;
+#    }
+    if ( $sql =~ /(.*)$comment_re$/s) {
+       $sql = $1;
+       $self->{"comment"} = $2;
+    }
+    if ($sql =~ /^(.*)--(.*)(\n|$)/) {
+       $sql               = $1;
+       $self->{"comment"} = $2;
     }
 
     $sql =~ s/\n/ /g;
@@ -1555,7 +1671,7 @@ sub clean_sql {
        #
        # $sql =~ s/\s*\(/(/g;   # trim whitespace before (
        # $sql =~ s/\)\s*/)/g;   # trim whitespace after )
-    for my $op( qw( = <> < > <= >= ) ) {
+    for my $op( qw( = <> < > <= >= \|\|) ) {
         $sql =~ s/(\S)$op/$1 $op/g;
         $sql =~ s/$op(\S)/$op $1/g;
     }
@@ -1566,7 +1682,6 @@ sub clean_sql {
     $sql =~ s/,\s*/,/g;
     $sql =~ s/^\s+//;
     $sql =~ s/\s+$//;
-    $self->{"struct"}->{"literals"} = $fields;
     return $sql;
 }
 
@@ -1814,7 +1929,7 @@ Returns the substring starting at start_pos and extending for
   SUBSTRING( 'foobar' FROM 4 FOR 2)  # returns "ba"
 
 
-=item  UPPER(string) and LOWER(string)
+=item UPPER(string) and LOWER(string)
 
 These return the upper-case and lower-case variants of the string:
 
@@ -1822,6 +1937,17 @@ These return the upper-case and lower-case variants of the string:
    LOWER('FOO') # returns "foo"
 
 =back
+
+=head2 Identifiers (table & column names)
+
+Regular identifiers (table and column names *without* quotes around them) are case INSENSITIVE so column foo, fOo, FOO all refer to the same column.
+
+Delimited identifiers (table and column names *with* quotes around them) are case SENSITIVE so column "foo", "fOo", "FOO" each refer to different columns.
+
+A delimited identifier is *never* equal to a regular identifer (so "foo" and foo are two different columns).  But don't do that :-).
+
+Remember thought that, in DBD::CSV if table names are used directly as file names, the case sensitivity depends on the OS e.g. on Windows files named foo, FOO, and fOo are the same as each other while on Unix they are different.
+
 
 =head1 METHODS
 

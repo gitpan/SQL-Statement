@@ -13,7 +13,7 @@ use SQL::Parser;
 use SQL::Eval;
 use vars qw($VERSION $numexp $s2pops $arg_num $dlm);
 
-$VERSION = '1.003';
+$VERSION = '1.004';
 
 $dlm = '~';
 $arg_num=0;
@@ -163,6 +163,14 @@ sub execute {
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
      $self->{'data'}) = $self->$command($data, $params);
     my $tables;
+    my $names = $self->{NAME};
+    @{$self->{NAME}} = map {
+      my $org = $self->{ORG_NAME}->{$_};
+      $org =~ s/^"//;
+      $org =~ s/"$//;
+      $org =~ s/""/"/g;
+      $org;
+    } @$names;
     @$tables = map {$_->{"name"}} @{ $self->{"tables"} };
     delete $self->{'tables'};  # Force closing the tables
       for (@$tables) {
@@ -190,10 +198,12 @@ sub CREATE ($$$) {
 sub DROP ($$$) {
     my($self, $data, $params) = @_;
     my($eval) = $self->open_tables($data, 0, 1);
-    return undef unless $eval;
-    $eval->params($params);
+#    return undef unless $eval;
+    return (-1,0) unless $eval;
+#    $eval->params($params);
     my($table) = $eval->table($self->tables(0)->name());
     $table->drop($data);
+#use mylibs; zwarn $self->{f_stmt};
     (-1, 0);
 }
 
@@ -215,17 +225,28 @@ sub INSERT ($$$) {
         for ($i = 0;  $i < $cNum;  $i++) {
             $col = $self->columns($i);
             $val = $self->row_values($i);
-            if (ref($val) eq 'SQL::Statement::Param') {
+            if ($val and ref($val) eq 'SQL::Statement::Param') {
                 $val = $eval->param($val->num());
             }
-            elsif ($val->{type} eq 'placeholder') {
+            elsif ($val and $val->{type} eq 'placeholder') {
                 $val = $eval->param($param_num++);
 	    }
             else {
 	         $val = $self->get_row_value($val,$eval);
 	    }
+#print $col->name."~".$self->{ORG_NAME}->{$col->name}."\n";
+#	    my $ccnum = $table->column_num($col->name);
+#	    if (!defined $ccnum) {
+#                $ccnum = $table->column_num(qq/"$col->name"/);
+#	    }
+#            $array->[$ccnum] = $val;
             $array->[$table->column_num($col->name())] = $val;
 #            $array->[$table->column_num(lc $col->name())] = $val;
+
+#if ( $self->{ORG_NAME}->{$col->name} ) {
+#    $col = qq/"/.$self->{ORG_NAME}->{$col}.qq/"/;
+#} 
+#            $array->[$table->column_num($col->name())] = $val;
         }
     } else {
         return $self->do_err("Bad col names in INSERT");
@@ -296,6 +317,14 @@ sub UPDATE ($$$) {
         #print $param_num;
         #print $eval->param($param_num); print "@$params"; exit;
         #$arg_num = 0;
+    my $col_nums = $eval->{"tables"}->{"$tname"}->{"col_nums"} ;
+    my $cols;
+    %$cols   = reverse %{ $col_nums };
+    my $rowhash;
+    #print "$tname -- @$rowary\n";
+    for (sort keys %$cols) {
+        $rowhash->{$cols->{$_}} = $array->[$_];
+    }
             for ($i = 0;  $i < $self->columns();  $i++) {
                 $col = $self->columns($i);
                 $val = $self->row_values($i);
@@ -306,7 +335,7 @@ sub UPDATE ($$$) {
                     $val = $eval->param($param_num++);
 	        }
                 else {
-     	            $val = $self->get_row_value($val,$eval);
+     	            $val = $self->get_row_value($val,$eval,$rowhash);
 	        }
                 $array->[$table->column_num($col->name())] = $val;
             }
@@ -684,7 +713,7 @@ sub SELECT ($$) {
     if ($self->{"join"}) {
         @{$self->{'NAME'}} = map { s/^[^$dlm]+$dlm//; $_} @names;
     }
-    $self->verify_order_cols;
+    $self->verify_order_cols($table);
     my @order_by = $self->order();
     my @extraSortCols = ();
     my $distinct = $self->distinct();
@@ -880,8 +909,22 @@ sub SELECT ($$) {
                 my $final = $final_row[$sf_index];
                 $final++      if $name =~ /COUNT/;
                 $final += $v  if $name =~ /SUM|AVG/;
-                $final  = $v  if ($name eq 'MAX' and $v and $final and $v > $final) or !defined $final;
-                $final  = $v  if( $name eq 'MIN' and $v < $final) or !defined $final;
+                #
+                # Thanks Dean Kopesky dean.kopesky@reuters.com
+                # submitted patch to make MIN/MAX do cmp on strings
+                # and == on numbers
+                #
+                $final  = $v  if !defined $final
+                              or ( $name eq 'MAX'
+                                   and $v
+                                   and $final
+                                   and anycmp($v,$final) > 0
+                                 );
+                $final  = $v  if !defined $final
+                              or ( $name eq 'MIN' 
+                                   and defined $v
+                                   and anycmp($v,$final) < 0
+                                  );
                 $final_row[$sf_index] = $final;
 	      }
 	    }
@@ -895,6 +938,16 @@ sub SELECT ($$) {
     }
     (scalar(@$rows), $numFields, $rows);
 }
+
+sub anycmp($$) {
+    my ($a,$b) = @_;
+    $a = '' unless defined $a;
+    $b = '' unless defined $b;
+    return ($a =~ $numexp && $b =~ $numexp)
+        ? ($a <=> $b)
+        : ($a cmp $b);
+}
+
 
 sub eval_where {
     my $self   = shift;
@@ -1010,16 +1063,14 @@ sub is_matched {
         }
     return undef if !defined $val1 or !defined $val2;
     if ($op =~ /LIKE|CLIKE/i) {
-        $val2 =~ s/%/\.\*/g;
-        $val2 =~ s/_/\?/g;
-    #    $val2 = quotemeta($val2);
-    }
-    if ($op =~ /LIKE/i) {
-        $val2 = quotemeta $val2;
+        $val2 = quotemeta($val2);
+        $val2 =~ s/\\%/.*/g;
+        $val2 =~ s/_/?/g;
     }
     if ( !$self->{"alpha_compare"} && $op =~ /lt|gt|le|ge/ ) {
         return 0;
     }
+    # print "[$val1] [$val2]\n";
     if ($op eq 'LIKE' )  { return $val1 =~ /^$val2$/s;  }
     if ($op eq 'CLIKE' ) { return $val1 =~ /^$val2$/si; }
     if ($op eq 'RLIKE' ) { return $val1 =~ /$val2/is;   }
@@ -1053,20 +1104,42 @@ sub open_tables {
     ## statement change
     #           $t->{"$name"} =
     #              $self->open_table($data, $name, $createMode, $lockMode);
+        my $open_name = $name;
+#        $open_name =~ s/^"(.+)"$/$1/;
+#$name = lc $name;
            if ($caller && $caller =~ /^DBD::AnyData/) {
                $caller .= '::Statement' if $caller !~ /::Statement/;
-               $t->{"$name"} = $caller->open_table($data, $name, $createMode,
+               $t->{"$name"} = $caller->open_table($data, $open_name, $createMode,
                                               $lockMode);
 	   }
            else {
-               $t->{"$name"} = $self->open_table($data, $name, $createMode, 
+               $t->{"$name"} = $self->open_table($data, $open_name, $createMode, 
                                                $lockMode);
 	   }
 
     ####
 	};
+        my $err = $t->{"$name"}->{errstr};
+        return $self->do_err($err) if $err;
         return $self->do_err($@) if $@;
-my @cnames  = map {lc $_} @{$t->{"$name"}->{"col_names"}};
+        return(SQL::Eval->new({'tables' => $t}), [])
+            if $self->command eq 'DROP';
+my @cnames;
+for my $c(@{$t->{"$name"}->{"col_names"}}) {
+  my $newc;
+  if ($c =~ /^"/) {
+ #    $c =~ s/^"(.+)"$/$1/;
+     $newc = $c;
+  }
+  else {
+#     $newc = lc $c;
+     $newc = uc $c;
+  }
+   push @cnames, $newc;
+   $self->{ORG_NAME}->{$newc}=$c;
+#   push @{$self->{ORG_NAME}},$c;
+
+}
 my $col_nums;
 my $i=0;
 for (@cnames) {
@@ -1101,9 +1174,9 @@ sub verify_columns {
     my @tmpcols = $self->columns;
 
 ###z
-  #  for (@tmpcols) {
-  #      $_->{"table"} = lc $_->{"table"};
-  #  }
+#    for (@tmpcols) {
+#        $_->{"table"} = lc $_->{"table"};
+#    }
 #use mylibs; print $self->command; zwarn \@tmpcols;
 ###z
     for my $c(@tmpcols) {
@@ -1127,7 +1200,7 @@ sub verify_columns {
     }
     $self->{"columns"} = $usr_cols;
     @tmpcols = map {$_->{name}} @$usr_cols;
-    # @tmpcols = map {lc $_->{name}} @$usr_cols;
+#     @tmpcols = map {lc $_->{name}} @$usr_cols;
     my $fully_qualified_cols=[];
     my %col_exists   = map {$_=>1} @tmp_cols;
 #    my %col_exists   = map {lc $_=>1} @tmp_cols;
@@ -1211,6 +1284,8 @@ sub verify_columns {
 	  }
        }
        else {
+#print "[$c~$col]\n";
+#use mylibs; zwarn \%col_exists;
            if (!$table) {
                return $self->do_err("Ambiguous column name '$c'")
                    if $is_duplicate{$c};
@@ -1221,13 +1296,24 @@ sub verify_columns {
            }
            else {
 	     if ($self->command eq 'SELECT') {
-#print "$table.$col\n"; use mylibs; zwarn \%col_exists;
+#print "$table.$col\n";
+#if ($col_exists{qq/$table."/.$self->{ORG_NAME}->{$col}.qq/"/}) {
+#    $col = q/"/.$self->{ORG_NAME}->{$col}.q/"/;
+#} 
+#print qq/$table."$col"/;
+# use mylibs; zwarn $self->{ORG_NAME};
 	     }
+             
                return $self->do_err("No such column '$table.$col'")
 #                     unless $col_exists{"\L$table.$col"};
-                     unless $col_exists{"$table.$col"};
+                     unless $col_exists{"$table.$col"}
+;#                         or $col_exists{qq/$table."/.$self->{ORG_NAME}->{$col}.qq/"/}
+;
            }
            next if $is_fully->{"$table.$col"};
+####
+  $self->{"columns"}->[$i]->{"name"} = $col;
+####
            $self->{"columns"}->[$i]->{"table"} = $table;
            push @$fully_qualified_cols, "$table.$col";
            $is_fully->{"$table.$col"}++;
@@ -1240,6 +1326,7 @@ sub verify_columns {
               $self->{"columns"} = \@newcols;
        }
     }
+#use mylibs; zwarn $self->{columns};
     return $fully_qualified_cols;
 }
 
@@ -1324,7 +1411,9 @@ sub get_row_value {
         /str_concat/              &&do {
                 my $valstr ='';
         	for (@{ $structure->{"value"} }) {
-                    $valstr .= $self->get_row_value($_,$eval,$rowhash);
+                    my $newval = $self->get_row_value($_,$eval,$rowhash);
+                    return undef unless defined $newval;
+                    $valstr .= $newval;
 	        }
                 return $valstr;
         };
@@ -1332,6 +1421,7 @@ sub get_row_value {
            my @vals = @{ $structure->{"vals"} };
            my $str  = $structure->{"str"};
            for my $i(0..$#vals) {
+#	     use mylibs; zwarn $rowhash;
                my $val = $self->get_row_value($vals[$i],$eval,$rowhash);
                return $self->do_err(
                    qq{Bad numeric expression '$vals[$i]->{"value"}'!}
@@ -1339,6 +1429,7 @@ sub get_row_value {
                $str =~ s/\?$i\?/$val/;
 	   }
            $str =~ s/\s//g;
+           $str =~ s/^([\)\(+\-\*\/0-9]+)$/$1/; # untaint
            return eval $str;
         };
 
@@ -1403,11 +1494,12 @@ sub colname2table {
          $name  = $c->{"name"};
          $table = $c->{"table"};
          push @cur_cols,$name;
-         #next unless $name eq $col_name;
-         last if $name eq $col_name;
-         $found++
+         next unless $name eq $col_name;
+         $found++;
+         last;
     }
     #print "$table - $name - $col_name\n";
+    undef $table unless $found;
     return $table;
     #print "$col_name $table @cur_cols\n";
     if ($found and $found > 1) {
@@ -1422,18 +1514,29 @@ sub colname2table {
 }
 
 sub verify_order_cols {
-    my $self = shift;
+    my $self  = shift;
+    my $table = shift;
     return unless $self->{"sort_spec_list"};
-#use mylibs;
-#zwarn $self->{"sort_spec_list"}; exit;
-    my @cols = $self->order;
-    for my $colnum(0..$#cols) {
+    my @ocols = $self->order;
+    my @tcols = @{$table->col_names};
+    my @n_ocols;
+#die "@ocols";
+#use mylibs; zwarn \@ocols; exit;
+    for my $colnum(0..$#ocols) {
         my $col = $self->order($colnum);
-        if (!defined $col->table and defined $self->columns($colnum)) {
-            $self->{"sort_spec_list"}->[$colnum]->{"col"}->{"table"} = 
-               $self->columns($colnum)->{"table"};
+#        if (!defined $col->table and defined $self->columns($colnum)) {
+        if (!defined $col->table ) {
+            my $cname = $ocols[$colnum]->{col}->name;
+            my $tname = $self->colname2table($cname);
+            return $self->do_err("No such column '$cname'.") unless $tname;
+            $self->{"sort_spec_list"}->[$colnum]->{"col"}->{"table"}=$tname;
+            push @n_ocols,$tname;
         }
     }
+#    for (@n_ocols) {
+#        die "$_" unless colname2table($_);
+#    }
+#use mylibs; zwarn $self->{"sort_spec_list"}; exit;
 }
 
 sub order {
@@ -1617,9 +1720,12 @@ sub new {
     }
     # print " $col_name !\n";
     my $num_tables = scalar @{ $tables };
-    if ($table_name && $table_name =~ /^([^.]*)\.(.*)$/) {
-        $table_name = $1;
-        $col_name = $2;
+    if ($table_name && (
+           $table_name =~ /^(".+")\.(.*)$/
+        or $table_name =~ /^([^.]*)\.(.*)$/
+        )) {
+            $table_name = $1;
+            $col_name = $2;
     }
     elsif ($num_tables == 1) {
         $table_name = $tables->[0];

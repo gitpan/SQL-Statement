@@ -1,5 +1,28 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.004, released 13 March, 2002
+------------------------------------------
+
+ * added support for delimited identifiers (inside double quotes);
+   these are case sensitive and can contain spaces and other
+   special chars
+
+ * added support for two forms of escaping single quotes inside
+   quoted values: 'O\'Brien' or  'O''Brien'
+
+ * added support for  both C-Style and SQL-Style double-hypen
+   comments,  e.g.  /* comment */ or -- comment
+
+ * added GetInfo.pm for use with $dbh->get_info()
+
+ * updated the readme file
+
+ * fixed bug in update that refers to its own columns
+   (e.g. SET num = num + 2)
+
+ * fixed bug in MIN and MAX when used with strings
+   Thanks Dean Kopesky <dean.kopesky@reuters.com>
+
 Version 1.003, released 01 March, 2002
 ------------------------------------------
 

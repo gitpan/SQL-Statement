@@ -8,4 +8,5 @@ lib/SQL/Parser.pm
 lib/SQL/Dialects/ANSI.pm
 lib/SQL/Dialects/AnyData.pm
 lib/SQL/Dialects/CSV.pm
+lib/SQL/Statement/GetInfo.pm
 test.pl
