@@ -1,4 +1,10 @@
-1998-07-22  Jochen Wiedmann  <joe@laptop.ispsoft.de>
+1998-07-23  Jochen Wiedmann  <joe@ispsoft.de> (0.1005)
+
+	* sql_data.h: Added "#define NULL" for SunOS 4.
+	* lib/SQL/Statement.pm (execute): Added "delete $self->{'tables'}"
+	  to unlock and/or close tables.
+
+1998-07-22  Jochen Wiedmann  <joe@ispsoft.de> (0.1004)
 
 	* sql_yacc.y: Added -DMSDOS under WIN32, so that malloc.h
 	  gets included.

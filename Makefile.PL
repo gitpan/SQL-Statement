@@ -3,7 +3,6 @@
 require 5.004;
 use strict;
 
-require DBI::DBD;
 require ExtUtils::MakeMaker;
 
 

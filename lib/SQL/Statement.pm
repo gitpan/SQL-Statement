@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1004';
+$VERSION = '0.1005';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -23,6 +23,7 @@ sub execute ($$;$) {
 
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
      $self->{'data'}) = $self->$command($data, $params);
+    delete $self->{'tables'};  # Force closing the tables
     $self->{'NUM_OF_ROWS'} || '0E0';
 }
 

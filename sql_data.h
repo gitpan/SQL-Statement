@@ -2,6 +2,11 @@
 #define SQL_STATEMENT_SQL_DATA_H 1
 
 
+#if !defined(NULL)
+#define NULL ((void*) 0)
+#endif
+
+
 /*
  *  Known commands
  */
