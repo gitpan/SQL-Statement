@@ -41,7 +41,7 @@ WHAT ELSE DO I NEED?
 
      perl
      DBI
-     DBD::CSV or DBD::AnyData
+     DBD::CSV or DBD::AnyData or other DBDs that subclass SQL::Statement
 
         
 WHERE DO I FIND OUT MORE?
@@ -51,13 +51,12 @@ documentation for that driver.  If you are subclassing the
 moduels, there are extensive help documents included with the
 modules.  Use perldoc or pod2html or simply read the POD section
 of the .pm files.  For further questions, write to the
-comp.lang.perl.modules newsgroup or the dbi-users@perl.org
-listserv.
+the dbi-users@perl.org listserv or try www.perlmonks.org.
 
 WHO DUNNIT?
 
 The original XS versions of the modules were written by Jochen
 Wiedmann.  The current, pure perl versions were rewritten
 (mostly from the ground up) by Jeff Zucker 
-<jeff@vpservices.com>.  Both versions are currently maintained
+<jzuckerATcpan.org>.  Both versions are currently maintained
 by Jeff.

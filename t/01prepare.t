@@ -1,8 +1,9 @@
-#!/usr/local/bin/perl -w
+#!perl -w
 use strict;
 $|=1;
-use lib './lib';
+use lib '../lib';
 use SQL::Statement;
+use Test::More tests => 100;
 print "[SQL::Statement $SQL::Statement::VERSION]\n";
 my $parser = SQL::Parser->new('ANSI',{RaiseError=>1});
 my $count;
@@ -15,17 +16,11 @@ for (<DATA>) {
     push @data,$_;
 }
 for my $sql(@data) {
-    $count++;
-    printf "%2d...",$count;
-    my $stmt = SQL::Statement->new($sql,$parser);
+    ok( my $stmt = SQL::Statement->new($sql,$parser) );
     #
     # NOTE: RaiseError is on so the program will die here
     #       if the SQL can't be parsed
     #
-    print "ok! ";
-    if ($count % 8 == 0) {
-        print "\n";
-    }
 }
 __DATA__
   /* DROP TABLE */
