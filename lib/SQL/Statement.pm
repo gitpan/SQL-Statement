@@ -1,71 +1,196 @@
-# -*- perl -*-
-
-require 5.004;
-use strict;
-
-use DynaLoader ();
-use SQL::Eval ();
-
-
 package SQL::Statement;
+#########################################################################
+#
+# This module is copyright (c), 2001 by Jeff Zucker, All Rights Reserved
+#
+# It may be freely distributed under the same terms as Perl itself.
+#
+# See below for help (search for SYNOPSIS)
+#########################################################################
 
-use vars qw($VERSION @ISA);
+use strict;
+use SQL::Parser;
+use SQL::Eval;
+use vars qw($VERSION $numexp $s2pops $arg_num $dlm);
 
-$VERSION = '0.1021';
-@ISA = qw(DynaLoader);
+$VERSION = '1.0';
 
-bootstrap SQL::Statement $VERSION;
+$dlm = '~';
+$arg_num=0;
+$s2pops = {
+              'LIKE'   => {'s'=>'LIKE',n=>'LIKE'},
+              'CLIKE'  => {'s'=>'CLIKE',n=>'CLIKE'},
+              'RLIKE'  => {'s'=>'RLIKE',n=>'RLIKE'},
+              '<'  => {'s'=>'lt',n=>'<'},
+              '>'  => {'s'=>'gt',n=>'>'},
+              '>=' => {'s'=>'ge',n=>'>='},
+              '<=' => {'s'=>'le',n=>'<='},
+              '='  => {'s'=>'eq',n=>'=='},
+              '<>' => {'s'=>'ne',n=>'!='},
+};
 
+sub new {
+    my $class  = shift;
+    my $sql    = shift;
+    my $flags  = shift;
+    #
+    # IF USER DEFINED extend_csv IN SCRIPT
+    # USE THE ANYDATA DIALECT RATHER THAN THE CSV DIALECT
+    # WITH DBD::CSV
+    #
+    if ($main::extend_csv or $main::extend_sql) {
+       $flags = SQL::Parser->new('AnyData');
+    }
+    my $parser = $flags;
+    my $self   = new2($class);
+    if (ref $flags eq 'SQL::Parser') {
+        my %newflags = (
+            RaiseError    => 1,
+            PrintError    => 1,
+            dialect       => 'AnyData',
+            text_numbers  => 1, # allow sorting of number-like text
+            alpha_compare => 1, # allow alphabetic comparison
+        );
+        for (keys %newflags) {
+            $self->{$_}=$newflags{$_};
+        }
+    }
+    else {
+        for (keys %$flags) {
+            $self->{$_}=$flags->{$_};
+        }
+        my $parser_dialect = $flags->{dialect} || 'CSV';
+        $parser = new SQL::Parser($parser_dialect,$flags) ;
+    }
+    $self->{PrintError} ||= 1;
+    $numexp = exists $self->{text_numbers}
+        ? qr/^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/
+        : qr/^\s*[+-]?\s*\.?\s*\d/;
+    $self->prepare($sql,$parser);
+    return $self;
+}
 
-sub execute ($$;$) {
+sub new2 {
+    my $class  = shift;
+    my $self   = {};
+    return bless $self, $class;
+}
+
+sub prepare {
+    my $self   = shift;
+    my $sql    = shift;
+    return $self if $self->{already_prepared}->{$sql};
+    my $parser =  shift;
+    my $rv;
+    if( $rv = $parser->parse($sql) ) {
+       %$self = (%$self,%{$parser->{struct}});
+       my $tables  = $self->{table_names};
+       my $columns = $parser->{struct}->{column_names};
+       if ($columns and scalar @$columns == 1 and $columns->[0] eq '*') {
+        $self->{asterisked_columns} = 1;
+       }
+       undef $self->{columns};
+       my $values  = $self->{values};
+       my $param_num = -1;
+       if ($self->{limit_clause}) {
+	 $self->{limit_clause} =
+             SQL::Statement::Limit->new( $self->{limit_clause} );
+       }
+       if ($values) {
+           for my $i(0..scalar@{$self->{values}}-1) {
+               if ($self->{values}->[$i]->{type} eq 'placeholder') {
+                   $param_num++;
+                   $self->{values}->[$i] =
+                       SQL::Statement::Param->new($param_num);
+                   push @{ $self->{params} }, $self->{values}->[$i];
+ 	       }
+           }
+       }
+       if ($self->{sort_spec_list}) {
+           for my $i(0..scalar @{$self->{sort_spec_list}} -1 ) {
+                my($col,$direction) = each %{ $self->{sort_spec_list}->[$i] };
+                my $tname;
+                 if ($col && $col=~/(.*)\.(.*)/) {
+                    $tname = $1; $col=$2;
+                }
+               undef $direction unless $direction && $direction eq 'DESC';
+               $self->{sort_spec_list}->[$i] =
+                    SQL::Statement::Order->new(
+                        col   => SQL::Statement::Column->new($col,[$tname]),
+                        desc  => $direction,
+                    );
+           }
+       }
+       for (@$columns) {
+           push @{ $self->{columns} },
+                SQL::Statement::Column->new($_,$tables);
+       }
+       for (@$tables) {
+           push @{ $self->{tables} },
+                SQL::Statement::Table->new($_);
+       }
+       if ($self->{where_clause}) {
+           if ($self->{where_clause}->{combiners}) {
+               for ( @{ $self->{where_clause}->{combiners} } ) {
+                   if(/OR/i) { $self->{has_OR} = 1; last;}
+               }
+           }
+           my $arg_num = -1;
+           for my $p( @{ $self->{where_clause}->{predicates} } ) {
+              my($a1,$a2) = ($p->{arg1},$p->{arg2});
+              $arg_num++;
+              if ($a1 eq '?') {
+                 $param_num++;
+                 $self->{where_params}->[$arg_num] = 
+                    SQL::Statement::Param->new($param_num);
+                  push @{ $self->{params} }, $self->{where_params}->[$arg_num];
+	      }
+              $arg_num++;
+              if ($a2 eq '?') {
+                 $param_num++;
+                 $self->{where_params}->[$arg_num] = 
+                    SQL::Statement::Param->new($param_num);
+                  push @{ $self->{params} }, $self->{where_params}->[$arg_num];
+	      }
+           }
+       }
+       $self->{already_prepared}->{$sql}++;
+       return $self;
+    }
+    else {
+       $self->{errstr} =  $parser->errstr;
+       $self->{already_prepared}->{$sql}++;
+       return undef;
+    }
+}
+
+sub execute {
     my($self, $data, $params) = @_;
     my($table, $msg);
     my($command) = $self->command();
-
+    return undef unless $command;
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
      $self->{'data'}) = $self->$command($data, $params);
+    my $tables;
+    @$tables = map {$_->{name}} @{ $self->{tables} };
     delete $self->{'tables'};  # Force closing the tables
+      for (@$tables) {
+           push @{ $self->{tables} },
+                SQL::Statement::Table->new($_);
+       }
     $self->{'NUM_OF_ROWS'} || '0E0';
 }
 
-sub open_tables ($$$$) {
-    my($self, $data, $createMode, $lockMode) = @_;
-    my($tables) = {};
-    my($table);
-    foreach $table ($self->tables()) {
-	my($tname) = $table->name();
-	if (!($tables->{$tname}
-	      = $self->open_table($data, $tname, $createMode, $lockMode))) {
-	    return undef;
-	}
-    }
-    SQL::Eval->new({'tables' => $tables});
-}
-
-sub verify_columns ($$$) {
-    my($self, $eval, $data) = @_;
-    my($column, $tbl, $col);
-    foreach $column ($self->val()) {
-	if (ref($column)  &&  $column->isa("SQL::Statement::Column")) {
-	    ($tbl, $col) = ($column->table(), $column->name());
-	    if ($col ne '*'  &&
-		!defined($eval->table($tbl)->column_num($col))) {
-		die "Unknown column: $tbl.$col";
-	    }
-	}
-    }
-}
-
-
 sub CREATE ($$$) {
     my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 1, 1);
+    my($eval,$foo) = $self->open_tables($data, 1, 1);
+    return undef unless $eval;
     $eval->params($params);
     my($row) = [];
     my($col);
     my($table) = $eval->table($self->tables(0)->name());
     foreach $col ($self->columns()) {
-	push(@$row, $col->name());
+        push(@$row, $col->name());
     }
     $table->push_names($data, $row);
     (0, 0);
@@ -74,6 +199,7 @@ sub CREATE ($$$) {
 sub DROP ($$$) {
     my($self, $data, $params) = @_;
     my($eval) = $self->open_tables($data, 0, 1);
+    return undef unless $eval;
     $eval->params($params);
     my($table) = $eval->table($self->tables(0)->name());
     $table->drop($data);
@@ -82,9 +208,10 @@ sub DROP ($$$) {
 
 sub INSERT ($$$) {
     my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 0, 1);
+    my($eval,$all_cols) = $self->open_tables($data, 0, 1);
+    return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns($eval, $data);
+    $self->verify_columns($eval, $all_cols) if scalar ($self->columns());
     my($table) = $eval->table($self->tables(0)->name());
     $table->seek($data, 0, 2);
     my($array) = [];
@@ -92,90 +219,367 @@ sub INSERT ($$$) {
     my($columns) = $table->{'colNums'};
     my($cNum) = scalar($self->columns());
     if ($cNum) {
-	# INSERT INTO $table (row, ...) VALUES (value, ...)
-	for ($i = 0;  $i < $cNum;  $i++) {
-	    $col = $self->columns($i);
-	    $val = $self->row_values($i);
-	    if (ref($val) eq 'SQL::Statement::Param') {
-		$val = $eval->param($val->num());
+        # INSERT INTO $table (row, ...) VALUES (value, ...)
+        for ($i = 0;  $i < $cNum;  $i++) {
+            $col = $self->columns($i);
+            $val = $self->row_values($i);
+            if (ref($val) eq 'SQL::Statement::Param') {
+                $val = $eval->param($val->num());
+            }
+            else {
+	         $val = $self->get_row_value($val);
 	    }
-	    $array->[$table->column_num($col->name())] = $val;
-	}
+            $array->[$table->column_num($col->name())] = $val;
+        }
     } else {
-	# INSERT INTO $table VALUES (value, ...)
-	$cNum = scalar($self->row_values());
-	for ($i = 0;  $i < $cNum;  $i++) {
-	    $val = $self->row_values($i);
-	    if (ref($val) eq 'SQL::Statement::Param') {
-		$val = $eval->param($val->num());
-	    }
-	    $array->[$i] = $val;
-	}
+        # INSERT INTO $table VALUES (value, ...)
+        # NOT USED BECAUSE $cNum automatically assigned
+#        $cNum = scalar($self->row_values());
+#        for ($i = 0;  $i < $cNum;  $i++) {
+#            $val = $self->row_values($i);
+#            $val = $self->get_row_value($val);
+#            if (ref($val) eq 'SQL::Statement::Param') {
+#                $val = $eval->param($val->num());
+#            }
+#            $array->[$i] = $val;
+#        }
     }
     $table->push_row($data, $array);
     (1, 0);
 }
 
-sub UPDATE ($$$) {
-    my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 0, 1);
-    $eval->params($params);
-    $self->verify_columns($eval, $data);
-    my($table) = $eval->table($self->tables(0)->name());
-    my($affected) = 0;
-    my(@rows, $array, $val, $col, $i);
-    while ($array = $table->fetch_row($data)) {
-	if ($self->eval_where($eval)) {
-	    for ($i = 0;  $i < $self->columns();  $i++) {
-		$col = $self->columns($i);
-		$val = $self->row_values($i);
-		if (ref($val) eq 'SQL::Statement::Param') {
-		    $val = $eval->param($val->num());
-		}
-		$array->[$table->column_num($col->name())] = $val;
-	    }
-	    ++$affected;
-	}
-	push(@rows, $array);
-    }
-    $table->seek($data, 0, 0);
-    foreach $array (@rows) {
-	$table->push_row($data, $array);
-    }
-    $table->truncate($data);
-    ($affected, 0);
-}
-
 sub DELETE ($$$) {
     my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 0, 1);
+    my($eval,$all_cols) = $self->open_tables($data, 0, 1);
+    return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns($eval, $data);
+    $self->verify_columns($eval, $all_cols);
     my($table) = $eval->table($self->tables(0)->name());
     my($affected) = 0;
     my(@rows, $array);
     while ($array = $table->fetch_row($data)) {
-	if ($self->eval_where($eval)) {
-	    ++$affected;
-	} else {
-	    push(@rows, $array);
-	}
+        if ($self->eval_where($eval,'',$array)) {
+            ++$affected;
+        } else {
+            push(@rows, $array);
+        }
     }
     $table->seek($data, 0, 0);
     foreach $array (@rows) {
-	$table->push_row($data, $array);
+        $table->push_row($data, $array);
     }
     $table->truncate($data);
     ($affected, 0);
 }
 
+sub UPDATE ($$$) {
+    my($self, $data, $params) = @_;
+    my($eval,$all_cols) = $self->open_tables($data, 0, 1);
+    return undef unless $eval;
+    $eval->params($params);
+    $self->verify_columns($eval, $all_cols);
+    my($table) = $eval->table($self->tables(0)->name());
+    my $tname = $self->tables(0)->name();
+    my($affected) = 0;
+    my(@rows, $array, $val, $col, $i);
+    while ($array = $table->fetch_row($data)) {
+        if ($self->eval_where($eval,$tname,$array)) {
+            for ($i = 0;  $i < $self->columns();  $i++) {
+                $col = $self->columns($i);
+                $val = $self->row_values($i);
+                if (ref($val) eq 'SQL::Statement::Param') {
+                    $val = $eval->param($val->num());
+                }
+                else {
+                    $val = $self->get_row_value($val) unless defined $val;
+		}
+                $array->[$table->column_num($col->name())] = $val;
+            }
+            ++$affected;
+        }
+        push(@rows, $array);
+    }
+    $table->seek($data, 0, 0);
+    foreach $array (@rows) {
+        $table->push_row($data, $array);
+    }
+    $table->truncate($data);
+    ($affected, 0);
+}
+
+sub find_join_columns {
+    my $self = shift;
+    my @all_cols = @_;
+    my $display_combine = 'NONE';
+    $display_combine = 'NATURAL' if $self->{join}->{type} =~ /NATURAL/;
+    $display_combine = 'USING'   if $self->{join}->{clause} =~ /USING/;
+    $display_combine = 'NAMED' if !$self->{asterisked_columns};
+    my @display_cols;
+    my @keycols = ();
+    @keycols = @{ $self->{join}->{keycols} } if $self->{join}->{keycols};
+    @keycols  = map {s/\./$dlm/; $_} @keycols;
+    my %is_key_col;
+    %is_key_col = map { $_=> 1 } @keycols;
+
+    # IF NAMED COLUMNS, USE NAMED COLUMNS
+    #
+    if ($display_combine eq 'NAMED') {
+        @display_cols =  $self->columns;
+        @display_cols = map {$_->table . $dlm . $_->name} @display_cols;
+    }
+
+    # IF ASTERISKED COLUMNS AND NOT NATURAL OR USING
+    # USE ALL COLUMNS, IN ORDER OF NAMING OF TABLES
+    #
+    elsif ($display_combine eq 'NONE') {
+        @display_cols =  @all_cols;
+    }
+
+    # IF NATURAL, COMBINE ALL SHARED COLUMNS
+    # IF USING, COMBINE ALL KEY COLUMNS
+    #
+    else  {
+        my %is_natural;
+        for my $full_col(@all_cols) {
+            my($table,$col) = $full_col =~ /^([^$dlm]+)$dlm(.+)$/;
+            next if $display_combine eq 'NATURAL' and $is_natural{$col};
+            next if $display_combine eq 'USING' and $is_natural{$col} and
+                 $is_key_col{$col};
+            push @display_cols,  $full_col;
+            $is_natural{$col}++;
+        }
+    }
+    my @shared = ();
+    my %is_shared;
+    if ($self->{join}->{type} =~ /NATURAL/ ) {
+        for my $full_col(@all_cols) {
+            my($table,$col) = $full_col =~ /^([^$dlm]+)$dlm(.+)$/;
+            push @shared, $col if  $is_shared{$col}++;
+        }
+    }
+    else {
+        @shared = @keycols;
+        # @shared = map {s/^[^_]*_(.+)$/$1/; $_} @keycols;
+        # @shared = grep !$is_shared{$_}++, @shared
+    }
+    #print "@keycols [[@shared]]\n";
+    #print "<@display_cols>\n";
+    $self->{join}->{shared_cols} = \@shared;
+    $self->{join}->{display_cols} = \@display_cols;
+}
+
+sub JOIN {
+    my($self, $data, $params) = @_;
+    if ($self->{join}->{type} =~ /RIGHT/ ) {
+        my @tables = $self->tables;
+        $self->{tables}->[0] = $tables[1];
+        $self->{tables}->[1] = $tables[0];
+    }
+    my($eval,$all_cols) = $self->open_tables($data, 0, 0);
+    return undef unless $eval;
+    $eval->params($params);
+    $self->verify_columns( $eval, $all_cols );
+    my @tables = $self->tables;
+    @tables = map {$_->name} @tables;
+
+    # GET THE LIST OF QUALIFIED COLUMN NAMES FOR DISPLAY
+    # *IN ORDER BY NAMING OF TABLES*
+    #
+    my @all_cols;
+    for my $table(@tables) {
+        my @cols = @{ $eval->table($table)->col_names };
+        push @all_cols, $table . $dlm . $_ for @cols;
+    }
+    $self->find_join_columns(@all_cols);
+
+    # JOIN THE TABLES
+    # *IN ORDER *BY JOINS*
+    #
+    @tables = @{ $self->{join}->{table_order} }
+           if $self->{join}->{table_order};
+    my $tableA;
+    my $tableB;
+    $tableA = shift @tables;
+    $tableB = shift @tables;
+    my $tableAobj = $eval->table($tableA);
+    my $tableBobj = $eval->table($tableB);
+    $tableAobj->{NAME} ||= $tableA;
+    $tableBobj->{NAME} ||= $tableB;
+    $self->join_2_tables($data,$params,$tableAobj,$tableBobj);
+    for my $next_table(@tables) {
+        $tableAobj = $self->{join}->{table};
+        $tableBobj = $eval->table($next_table);
+        $tableBobj->{NAME} ||= $next_table;
+        $self->join_2_tables($data,$params,$tableAobj,$tableBobj);
+        $self->{cur_table} = $next_table;
+    }
+    return $self->SELECT($data,$params);
+}
+
+sub join_2_tables {
+    my($self, $data, $params, $tableAobj, $tableBobj) = @_;
+    #print "<< ".$self->{cur_table}." >>\n" if $self->{cur_table};
+    my $tableA = $tableAobj->{NAME};
+    my $tableB = $tableBobj->{NAME};
+    my $share_type = 'ON';
+    $share_type    = 'NATURAL' if $self->{join}->{type} =~ /NATURAL/;
+    $share_type    = 'USING'   if $self->{join}->{clause} =~ /USING/;
+    my $join_type  = 'INNER';
+    $join_type     = 'LEFT'  if $self->{join}->{type} =~ /LEFT/;
+    $join_type     = 'RIGHT' if $self->{join}->{type} =~ /RIGHT/;
+    $join_type     = 'FULL'  if $self->{join}->{type} =~ /FULL/;
+    my @colsA = @{$tableAobj->col_names};
+    my @colsB = @{$tableBobj->col_names};
+    my %iscolA = map { $_=>1} @colsA;
+    my %iscolB = map { $_=>1} @colsB;
+    my %isunqualA = map { $_=>1} @colsA;
+    my %isunqualB = map { $_=>1} @colsB;
+    my @shared_cols;
+    my %is_shared;
+    my @tmpshared = @{ $self->{join}->{shared_cols} };
+    if ($share_type eq 'USING') {
+        for (@tmpshared) {
+             push @shared_cols, $tableA . $dlm . $_;
+             push @shared_cols, $tableB . $dlm . $_;
+        }
+    }
+    if ($share_type eq 'NATURAL') {
+        for my $c(@colsA) {
+            $c =~ s/^[^$dlm]+$dlm(.+)$/$1/ if $tableA eq "${dlm}tmp";
+ 	    if ($iscolB{$c}) {
+                push @shared_cols, $tableA . $dlm . $c;
+                push @shared_cols, $tableB . $dlm . $c;
+	    }
+        }
+    }
+    my @all_cols = map { $tableA . $dlm . $_ } @colsA;
+    @all_cols = ( @all_cols, map { $tableB . $dlm . $_ } @colsB);
+    @all_cols = map { s/${dlm}tmp$dlm//; $_; } @all_cols;
+    if ($tableA eq "${dlm}tmp") {
+        #@colsA = map {s/^[^_]+_(.+)$/$1/; $_; } @colsA;
+    }
+    else {
+        @colsA = map { $tableA . $dlm . $_ } @colsA;
+    }
+    @colsB = map { $tableB . $dlm . $_ } @colsB;
+    my %isa;
+    my $i=0;
+    my $col_numsA = { map { $_=>$i++}  @colsA };
+    $i=0;
+    my $col_numsB = { map { $_=>$i++} @colsB };
+    %iscolA = map { $_=>1} @colsA;
+    %iscolB = map { $_=>1} @colsB;
+    my @blankA = map {undef} @colsA;
+    my @blankB = map {undef} @colsB;
+    if ($share_type eq 'ON' ) {
+        while (@tmpshared) {
+            my $k1 = shift @tmpshared;
+            my $k2 = shift @tmpshared;
+            next unless ($iscolA{$k1} or $iscolB{$k1});
+            next unless ($iscolA{$k2} or $iscolB{$k2});
+            next if !$iscolB{$k1} and !$iscolB{$k2};
+            my($t,$c) = $k1 =~ /^([^$dlm]+)$dlm(.+)$/;
+            next if !$isunqualB{$c};
+            push @shared_cols, $k1 unless $is_shared{$k1}++;
+            ($t,$c) = $k2 =~ /^([^$dlm]+)$dlm(.+)$/;
+            next if !$isunqualB{$c};
+            push @shared_cols, $k2 if !$is_shared{$k2}++;
+        }
+    }
+    %is_shared = map {$_=>1} @shared_cols;
+    my($posA,$posB)=([],[]);
+    for my $f(@shared_cols) {
+         my($t,$c) = $f =~ /^([^$dlm]+)$dlm(.+)$/;
+         push @$posA, $col_numsA->{$f} if $iscolA{$f};
+         push @$posB, $col_numsB->{$f} if $iscolB{$f};
+    }
+
+    # CYCLE THROUGH TABLE B, CREATING A HASH OF ITS VALUES
+    #
+    my $hashB={};
+    while (my $array = $tableBobj->fetch_row($data)) {
+        my $has_null_key=0;
+        my @key_vals = @$array[@$posB];
+        for (@key_vals) { next if defined $_; $has_null_key++; last; }
+        next if $has_null_key and $join_type eq 'INNER';
+        my $hashkey = join ' ',@key_vals;
+        push @{$hashB->{$hashkey}}, $array;
+    }
+
+    # CYCLE THROUGH TABLE A
+    #
+    my $joined_table;
+    my %visited;
+    while (my $arrayA = $tableAobj->fetch_row($data)) {
+        #print "[$_]" for @$arrayA; print "\n";
+        my $has_null_key = 0;
+        my @key_vals = @$arrayA[@$posA];
+        for (@key_vals) { next if defined $_; $has_null_key++; last; }
+        next if $has_null_key and $join_type eq 'INNER';
+        my $hashkey = join ' ',@key_vals;
+        my $rowsB = $hashB->{$hashkey};
+        if (!defined $rowsB and $join_type ne 'INNER' ) {
+            push @$rowsB, \@blankB;
+	}
+        for my $arrayB(@$rowsB) {
+            my @newRow = (@$arrayA,@$arrayB);
+            if ($join_type ne 'UNION' ) {
+                 push @$joined_table,\@newRow;
+             }
+        }
+        $visited{$hashkey}++; #        delete $hashB->{$hashkey};
+    }
+
+    # ADD THE LEFTOVER B ROWS IF NEEDED
+    #
+    if ($join_type=~/(FULL|UNION)/) {
+      while (my($k,$v)= each%$hashB) {
+         next if $visited{$k};
+ 	 for my $rowB(@$v) {
+             my @arrayA;
+             my @tmpB;
+             my $rowhash;
+             @{$rowhash}{@colsB}=@$rowB;
+             for my $c(@all_cols) {
+                 my($table,$col) = $c =~ /^([^$dlm]+)$dlm(.+)/;
+                 push @arrayA,undef if $table eq $tableA;
+                 push @tmpB,$rowhash->{$c} if $table eq $tableB;
+	     }
+             @arrayA[@$posA]=@tmpB[@$posB] if $share_type =~ /(NATURAL|USING)/;
+             my @newRow = (@arrayA,@tmpB);
+             push @$joined_table, \@newRow;
+	 }
+      }
+    }
+    undef $hashB;
+    undef $tableAobj;
+    undef $tableBobj;
+    $self->{join}->{table} =
+        SQL::Statement::TempTable->new(
+            $dlm . 'tmp',
+            \@all_cols,
+            $self->{join}->{display_cols},
+            $joined_table
+    );
+}
+
 sub SELECT ($$) {
     my($self, $data, $params) = @_;
-    my($eval) = $self->open_tables($data, 0, 0);
-    $eval->params($params);
-    $self->verify_columns($eval, $data);
-    my $tableName = $self->tables(0)->name();
-    my $table = $eval->table($tableName);
+    $self->{params} ||= $params;
+    my($eval,$all_cols,$tableName,$table);
+    if (defined $self->{join}) {
+        return $self->JOIN($data,$params) if !defined $self->{join}->{table};
+        $tableName = $dlm . 'tmp';
+        $table     = $self->{join}->{table};
+    }
+    else {
+        ($eval,$all_cols) = $self->open_tables($data, 0, 0);
+        return undef unless $eval;
+        $eval->params($params);
+        $self->verify_columns( $eval, $all_cols );
+        $tableName = $self->tables(0)->name();
+        $table = $eval->table($tableName);
+    }
     my $rows = [];
 
     # In a loop, build the list of columns to retrieve; this will be
@@ -184,182 +588,770 @@ sub SELECT ($$) {
     my $numFields = 0;
     my %columns;
     my @names;
-    foreach my $column ($self->columns()) {
-	if (ref($column) eq 'SQL::Statement::Param') {
-	    my $val = $eval->param($column->num());
-	    if ($val =~ /(.*)\.(.*)/) {
-		$col = $1;
-		$tbl = $2;
-	    } else {
-		$col = $val;
-		$tbl = $tableName;
-	    }
-	} else {
-	    ($col, $tbl) = ($column->name(), $column->table());
-	}
-	if ($col eq '*') {
-	    $ar = $table->col_names();
-	    for ($i = 0;  $i < @$ar;  $i++) {
-		my $cName = $ar->[$i];
-		$columns{$tbl}->{$cName} = $numFields++;
-		$c = SQL::Statement::Column->new({'table' => $tableName,
-						  'column' => $cName});
-		push(@$cList, $i);
-		push(@names, $cName);
-	    }
-	} else {
-	    $columns{$tbl}->{$col} = $numFields++;
-	    push(@$cList, $table->column_num($col));
-	    push(@names, $col);
-	}
+    if ($self->{join}) {
+          @names = @{ $table->col_names };
+          for my $col(@names) {
+             $columns{$tableName}->{$col} = $numFields++;
+             push(@$cList, $table->column_num($col));
+          }
     }
+    else {
+        foreach my $column ($self->columns()) {
+            if (ref($column) eq 'SQL::Statement::Param') {
+                my $val = $eval->param($column->num());
+                if ($val =~ /(.*)\.(.*)/) {
+                    $col = $1;
+                    $tbl = $2;
+                } else {
+                    $col = $val;
+                    $tbl = $tableName;
+                }
+            } else {
+                ($col, $tbl) = ($column->name(), $column->table());
+        }
+        if ($col eq '*') {
+            $ar = $table->col_names();
+            for ($i = 0;  $i < @$ar;  $i++) {
+                my $cName = $ar->[$i];
+                $columns{$tbl}->{$cName} = $numFields++;
+                $c = SQL::Statement::Column->new({'table' => $tableName,
+                                                  'column' => $cName});
+                push(@$cList, $i);
+                push(@names, $cName);
+            }
+        } else {
+            $columns{$tbl}->{$col} = $numFields++;
+            push(@$cList, $table->column_num($col));
+            push(@names, $col);
+        }
+    }
+    }
+    $cList = [] unless defined $cList;
     $self->{'NAME'} = \@names;
-
+    if ($self->{join}) {
+        @{$self->{'NAME'}} = map { s/^[^$dlm]+$dlm//; $_} @names;
+    }
+    $self->verify_order_cols;
     my @order_by = $self->order();
-    my @extraSortCols;
+    my @extraSortCols = ();
     my $distinct = $self->distinct();
     if ($distinct) {
-	# Silently extend the ORDER BY clause to the full list of
-	# columns.
-	my %ordered_cols;
-	foreach my $column (@order_by) {
-	    ($col, $tbl) = ($column->column(), $column->table());
-	    $ordered_cols{$tbl}->{$col} = 1;
-	}
-	while (my($tbl, $cref) = each %columns) {
-	    foreach my $col (keys %$cref) {
-		if (!$ordered_cols{$tbl}->{$col}) {
-		    $ordered_cols{$tbl}->{$col} = 1;
-		    push(@order_by,
-			 SQL::Statement::Order->new
-			 ('col' => SQL::Statement::Column->new
-			  ({'table' => $tbl,
-			    'column' => $col}),
-			  'desc' => 0));
-		}
-	    }
-	}
+        # Silently extend the ORDER BY clause to the full list of
+        # columns.
+        my %ordered_cols;
+        foreach my $column (@order_by) {
+            ($col, $tbl) = ($column->column(), $column->table());
+            $tbl ||= $self->colname2table($col);
+            $ordered_cols{$tbl}->{$col} = 1;
+        }
+        while (my($tbl, $cref) = each %columns) {
+            foreach my $col (keys %$cref) {
+                if (!$ordered_cols{$tbl}->{$col}) {
+                    $ordered_cols{$tbl}->{$col} = 1;
+                    push(@order_by,
+                         SQL::Statement::Order->new
+                         ('col' => SQL::Statement::Column->new
+                          ({'table' => $tbl,
+                            'column' => $col}),
+                          'desc' => 0));
+                }
+            }
+        }
     }
     if (@order_by) {
-	my $nFields = $numFields;
-	# It is possible that the user gave an ORDER BY clause with columns
-	# that are not part of $cList yet. These columns will need to be
-	# present in the array of arrays for sorting, but will be stripped
-	# off later.
-	foreach my $column (@order_by) {
-	    ($col, $tbl) = ($column->column(), $column->table());
-	    next if exists($columns{$tbl}->{$col});
-	    push(@extraSortCols, $table->column_num($col));
-	    $columns{$tbl}->{$col} = $nFields++;
-	}
+        my $nFields = $numFields;
+        # It is possible that the user gave an ORDER BY clause with columns
+        # that are not part of $cList yet. These columns will need to be
+        # present in the array of arrays for sorting, but will be stripped
+        # off later.
+        my $i=-1;
+        foreach my $column (@order_by) {
+            $i++;
+            ($col, $tbl) = ($column->column(), $column->table());
+            my $pos;
+            if ($self->{join}) {
+                  $tbl ||= $self->colname2table($col);
+                  $pos = $table->column_num($tbl."$dlm$col");
+                  if (!defined $pos) {
+                  $tbl = $self->colname2table($col);
+                  $pos = $table->column_num($tbl."_$col");
+		  }
+	    }
+            #print "$tbl~$col\n";
+            next if exists($columns{$tbl}->{$col});
+            $pos = $table->column_num($col) unless defined $pos;
+            push(@extraSortCols, $pos);
+            $columns{$tbl}->{$col} = $nFields++;
+        }
     }
-
+    my $e = $eval;
+    if ($self->{join}) {
+          $e = $table;
+    }
     while (my $array = $table->fetch_row($data)) {
-	if ($self->eval_where($eval)) {
-	    # Note we also include the columns from @extraSortCols that
-	    # have to be ripped off later!
-	    my @row = map { $array->[$_] } (@$cList, @extraSortCols);
-	    push(@$rows, \@row);
-	}
+        if ($self->eval_where($e,$tableName,$array)) {
+            # Note we also include the columns from @extraSortCols that
+            # have to be ripped off later!
+            my @row;
+            #            if (!scalar @$cList or !scalar @extraSortCols) {
+            #               @row = @$array;
+            #	    }
+            #            else {
+                @extraSortCols = () unless @extraSortCols;
+            #print "[$_]" for @$cList; print "\n";
+            @row = map { defined $array->[$_] ? $array->[$_] : undef } (@$cList, @extraSortCols);
+            #	    }
+            push(@$rows, \@row);
+        }
     }
-
     if (@order_by) {
-	my @sortCols = map {
-	    ($columns{$_->table()}->{$_->column()}, $_->desc())
-	} @order_by;
-	my($c, $d, $colNum, $desc);
-	my $sortFunc = sub {
-	    my $result;
-	    $i = 0;
-	    do {
-		$colNum = $sortCols[$i++];
-		$desc = $sortCols[$i++];
-		$c = $a->[$colNum];
-		$d = $b->[$colNum];
-		if (!defined($c)) {
-		    $result = defined $d ? -1 : 0;
-		} elsif (!defined($d)) {
-		    $result = 1;
-		} elsif ($c =~ /^\s*[+-]?\s*\.?\s*\d/  &&
-			 $d =~ /^\s*[+-]?\s*\.?\s*\d/) {
-		    $result = ($c <=> $d);
-		} else {
-		    $result = $c cmp $d;
-		}
-		if ($desc) {
-		    $result = -$result;
-		}
-	    } while (!$result  &&  $i < @sortCols);
-	    $result;
-	};
-	if ($distinct) {
-	    my $prev;
-	    @$rows = map {
-		if ($prev) {
-		    $a = $_;
-		    $b = $prev;
-		    if (&$sortFunc() == 0) {
-			();
-		    } else {
-			$prev = $_;
+        my @sortCols = map {
+            my $col = $_->column();
+            my $tbl = $_->table();
+ 	    if ($self->{join}) {
+               $tbl = 'shared' if $table->is_shared($col);
+               $tbl ||= $self->colname2table($col);
+	    }
+            #print $table->col_table(0),'~',$tbl,'~',$_->column(); exit;
+             ($columns{$tbl}->{$col}, $_->desc())
+        } @order_by;
+        #die "\n<@sortCols>@order_by\n";
+        my($c, $d, $colNum, $desc);
+        my $sortFunc = sub {
+            my $result;
+            $i = 0;
+            do {
+                $colNum = $sortCols[$i++];
+                $desc = $sortCols[$i++];
+                $c = $a->[$colNum];
+                $d = $b->[$colNum];
+                if (!defined($c)) {
+                    $result = defined $d ? -1 : 0;
+                } elsif (!defined($d)) {
+                    $result = 1;
+#	        } elsif ( is_number($c) && is_number($d) ) {
+	        } elsif ( $c =~ $numexp && $d =~ $numexp ) {
+                    $result = ($c <=> $d);
+                } else {
+  		    if ($self->{case_fold}) {
+                        $result = lc $c cmp lc $d || $c cmp $d;
 		    }
-		} else {
-		    $prev = $_;
-		}
-	    } ($] > 5.00504 ?
-	       sort $sortFunc @$rows :
-	       sort { &$sortFunc } @$rows);
-	} else {
-	    @$rows = $] > 5.00504 ?
-		(sort $sortFunc @$rows) :
-		(sort { &$sortFunc } @$rows)
-	}
+                    else {
+                        $result = $c cmp $d;
+		    }
+                }
+                if ($desc) {
+                    $result = -$result;
+                }
+            } while (!$result  &&  $i < @sortCols);
+            $result;
+        };
+        if ($distinct) {
+            my $prev;
+            @$rows = map {
+                if ($prev) {
+                    $a = $_;
+                    $b = $prev;
+                    if (&$sortFunc() == 0) {
+                        ();
+                    } else {
+                        $prev = $_;
+                    }
+                } else {
+                    $prev = $_;
+                }
+            } ($] > 5.00504 ?
+               sort $sortFunc @$rows :
+               sort { &$sortFunc } @$rows);
+        } else {
+            @$rows = $] > 5.00504 ?
+                (sort $sortFunc @$rows) :
+                (sort { &$sortFunc } @$rows)
+        }
 
-	# Rip off columns that have been added for @extraSortCols only
-	if (@extraSortCols) {
-	    foreach my $row (@$rows) {
-		splice(@$row, $numFields, scalar(@extraSortCols));
+        # Rip off columns that have been added for @extraSortCols only
+        if (@extraSortCols) {
+            foreach my $row (@$rows) {
+                splice(@$row, $numFields, scalar(@extraSortCols));
+            }
+        }
+    }
+    if ($self->{join}) {
+        my @final_cols = @{$self->{join}->{display_cols}};
+        @final_cols = map {$table->column_num($_)} @final_cols;
+        my @names = map { $self->{NAME}->[$_]} @final_cols;
+        $numFields = scalar @names;
+        $self->{NAME} = \@names;
+        my $i = -1;
+        for my $row(@$rows) {
+            $i++;
+            @{ $rows->[$i] } = @$row[@final_cols];
+        }
+    }
+    if (defined $self->{limit_clause}) {
+        my $offset = $self->{limit_clause}->offset || 0;
+        my $limit  = $self->{limit_clause}->limit  || 0;
+        @$rows = splice @$rows, $offset, $limit;
+    }
+    if ($self->{set_function}) {
+        my $numrows = scalar( @$rows );
+        my $numcols = scalar @{ $self->{NAME} };
+        my $i=0;
+        my %colnum = map {$_=>$i++} @{ $self->{NAME} };
+        for my $i(0 .. scalar @{$self->{set_function}} -1 ) {
+            my $arg = $self->{set_function}->[$i]->{arg};
+            $self->{set_function}->[$i]->{sel_col_num} = $colnum{$arg} if defined $colnum{$arg};
+        }
+        my($name,$arg,$sel_col_num);
+        my @set;
+        my $final=0;
+        $numrows=0;
+        my @final_row = map {undef} @{$self->{set_function}};
+  #      my $start;
+        for my $c(@$rows) {
+            $numrows++;
+            my $sf_index = -1;
+ 	    for my $sf(@{$self->{set_function}}) {
+              $sf_index++;
+	      if ($sf->{arg} eq '*') {
+                  $final_row[$sf_index]++;
+	      }
+              else {
+                my $v = $c->[$sf->{sel_col_num}];
+                my $name = $sf->{name};
+                next unless defined $v;
+                my $final = $final_row[$sf_index];
+                $final++      if $name =~ /COUNT/;
+                $final += $v  if $name =~ /SUM|AVG/;
+                $final  = $v  if ($name eq 'MAX' and $v > $final) or !defined $final;
+                $final  = $v  if( $name eq 'MIN' and $v < $final) or !defined $final;
+                $final_row[$sf_index] = $final;
+	      }
 	    }
 	}
+        for my $i(0..$#final_row) {
+	  if ($self->{set_function}->[$i]->{name} eq 'AVG') {
+              $final_row[$i] = $final_row[$i]/$numrows;
+	  }
+	}
+        return ( $numrows, scalar @final_row, [\@final_row]);
     }
-
+    #use mylibs; zwarn $rows; exit;
     (scalar(@$rows), $numFields, $rows);
 }
 
 
-package SQL::Statement::Column;
 
-sub new ($$) {
-    my($class, $attr) = @_;
-    bless($attr, (ref($class) || $class));
-    $attr;
+
+sub eval_where {
+    my $self   = shift;
+    my $eval   = shift;
+    my $tname  = shift;
+    my $rowary = shift;
+    $tname ||= $self->tables(0)->name();
+    my $where = $self->{where_clause} || return 1;
+    my $cols;
+    my $col_nums;
+    if ($self->{join}) {
+        $col_nums = $eval->{col_nums};
+    }
+    else {
+        $col_nums = $eval->{tables}->{$tname}->{col_nums} ;
+    }
+    %$cols   = reverse %{ $col_nums };
+    my $rowhash;
+    #print "$tname -- @$rowary\n";
+    for (sort keys %$cols) {
+        $rowhash->{$cols->{$_}} = $rowary->[$_];
+    }
+    my @truths;
+    $arg_num=0;
+    return $self->process_predicate ($where,$eval,$rowhash);
 }
-sub table ($) { shift->{'table'}; }
-sub name ($) { shift->{'column'}; }
+
+sub process_predicate {
+    my($self,$pred,$eval,$rowhash) = @_;
+    if ($pred->{op} eq 'OR') {
+        my $match1 = $self->process_predicate($pred->{arg1},$eval,$rowhash);
+        return 1 if $match1 and !$pred->{neg};
+        my $match2 = $self->process_predicate($pred->{arg2},$eval,$rowhash);
+        if ($pred->{neg}) {
+            return (!$match1 and !$match2) ? 1 : 0;
+        }
+        else {
+	    return $match2 ? 1 : 0;
+	}
+    }
+    elsif ($pred->{op} eq 'AND') {
+        my $match1 = $self->process_predicate($pred->{arg1},$eval,$rowhash);
+        if ($pred->{neg}) {
+	    return 1 unless $match1;
+        }
+        else {
+	    return 0 unless $match1;
+	}
+        my $match2 = $self->process_predicate($pred->{arg2},$eval,$rowhash);
+        if ($pred->{neg}) {
+            return $match2 ? 0 : 1;
+        }
+        else {
+	    return $match2 ? 1 : 0;
+	}
+    }
+    else {
+        my $val1 = $self->get_row_value( $pred->{arg1}, $eval, $rowhash );
+        my $val2 = $self->get_row_value( $pred->{arg2}, $eval, $rowhash );
+        my $op   = $pred->{op};
+        if (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
+            $op = ( $val1 =~ $numexp && $val2 =~ $numexp )
+                ? $s2pops->{$op}->{'n'}
+                : $s2pops->{$op}->{'s'};
+        }
+        #print "[$val1] [$op] [$val2]\n";
+        my $match = $self->is_matched($val1,$op,$val2) || 0;
+        if ($pred->{neg}) {
+           $match = $match ? 0 : 1;
+        }
+        return $match;
+    }
+}
+
+sub is_number {
+    my $x=shift;
+    return 0 if !defined $x;
+    return 1 if $x =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
+    return 0;
+}
+sub is_matched {
+    my($self,$val1,$op,$val2)=@_;
+    #print "[$val1] [$op] [$val2]\n";
+    if ($op eq 'IS') {
+        return defined $val1 ? 0 : 1;
+    }
+    return undef if !defined $val1 or !defined $val2;
+    if ($op =~ /LIKE|CLIKE/i) {
+        $val2 =~ s/%/\.\*/g;
+        $val2 =~ s/_/\?/g;
+    }
+    if ( !$self->{alpha_compare} && $op =~ /lt|gt|le|ge/ ) {
+        return 0;
+    }
+    if ($op eq 'LIKE' )  { return $val1 =~ /^$val2$/;  }
+    if ($op eq 'CLIKE' ) { return $val1 =~ /^$val2$/i; }
+    if ($op eq 'RLIKE' ) { return $val1 =~ /$val2/i;   }
+    if ($op eq '<' ) { return $val1 <  $val2; }
+    if ($op eq '>' ) { return $val1 >  $val2; }
+    if ($op eq '==') { return $val1 == $val2; }
+    if ($op eq '!=') { return $val1 != $val2; }
+    if ($op eq '<=') { return $val1 <= $val2; }
+    if ($op eq '>=') { return $val1 >= $val2; }
+    if ($op eq 'lt') { return $val1 lt $val2; }
+    if ($op eq 'gt') { return $val1 gt $val2; }
+    if ($op eq 'eq') { return $val1 eq $val2; }
+    if ($op eq 'ne') { return $val1 ne $val2; }
+    if ($op eq 'le') { return $val1 le $val2; }
+    if ($op eq 'ge') { return $val1 ge $val2; }
+}
+
+sub open_tables {
+    my($self, $data, $createMode, $lockMode) = @_;
+    my @call = caller 4;
+    my $caller = $call[3];
+    $caller =~ s/^([^:]*::[^:]*)::.*$/$1/;
+    my @c;
+    my $t;
+    my $is_col;
+    my @tables = $self->tables;
+    for ( @tables) {
+        my $name = $_->{name};
+        undef $@;
+         eval{
+    ## statement change
+    #           $t->{$name} =
+    #              $self->open_table($data, $name, $createMode, $lockMode);
+           if ($caller && $caller =~ /^DBD::AnyData/) {
+               $caller .= '::Statement' if $caller !~ /::Statement/;
+               $t->{$name} = $caller->open_table($data, $name, $createMode,
+                                              $lockMode);
+	   }
+           else {
+               $t->{$name} = $self->open_table($data, $name, $createMode, 
+                                               $lockMode);
+	   }
+
+    ####
+	};
+        return $self->doErr($@) if $@;
+        my $tcols = $t->{$name}->col_names;
+    ###z        @$tcols = map{$name.'.'.$_} @$tcols ;
+        my @newcols;
+        for (@$tcols) {
+            next unless defined $_;
+            my $ncol = $_;
+            $ncol = $name.'.'.$ncol unless $ncol =~ /\./;
+            push @newcols, $ncol;
+	}
+        @c = ( @c, @newcols );
+    }
+    return SQL::Eval->new({'tables' => $t}), \@c;
+}
+
+sub verify_columns {
+    my( $self, $eval, $all_cols )  = @_;
+    $all_cols ||= [];
+    my @tmp_cols  = @$all_cols;
+    my $usr_cols;
+    #print "[".$_->{name}."]" for $self->columns; exit;
+    for ($self->columns) { push @$usr_cols, $_->{name} }
+    #    @$usr_cols = map {$_->{name}} $self->columns;
+    my $fully_qualified_cols=[];
+    my %col_exists   = map {$_=>1} @tmp_cols;
+    my %short_exists = map {s/^([^.]*)\.(.*)/$1/; $2=>$1} @tmp_cols;
+    my(%is_member,@duplicates,%is_duplicate);
+    @duplicates = map {s/[^.]*\.(.*)/$1/; $_} @$all_cols;
+    @duplicates = grep($is_member{$_}++, @duplicates);
+    %is_duplicate = map { $_=>1} @duplicates;
+    my $is_fully;
+    my $i=-1;
+    my $num_tables = $self->tables;
+    for my $c(@$usr_cols) {
+       $i++;
+       my($table,$col) = ( $self->columns($i)->{table},
+                           $self->columns($i)->{name}
+                         );
+       next unless $col;
+       if ( $col eq '*' and $num_tables == 1) {
+          $table ||= $self->tables->[0]->{name};
+          if (ref $table eq 'SQL::Statement::Table') {
+            $table = $table->name;
+          }
+          my @table_names = $self->tables;
+          my $tcols = $eval->{tables}->{$table}->col_names;
+          for (@$tcols) {
+              push @{ $self->{columns} },
+                    SQL::Statement::Column->new($_,\@table_names);
+          }
+          $fully_qualified_cols = $tcols;
+          my @newcols;
+	  for (@{$self->{columns}}) {
+              push @newcols,$_ unless $_->{name} eq '*';
+	  }
+          $self->{columns} = \@newcols;
+       }
+       elsif ( $col eq '*' and $num_tables > 1) {
+          my @table_names = $self->tables;
+          for my $table(@table_names) {
+              $table = $table->name if ref $table eq 'SQL::Statement::Table';
+              my $tcols = $eval->{tables}->{$table}->col_names;
+              for (@$tcols) {
+                  push @{ $self->{columns} },
+                        SQL::Statement::Column->new($_,[$table]);
+              }
+              @{$fully_qualified_cols} = (@{$fully_qualified_cols}, @$tcols);
+              my @newcols;
+  	      for (@{$self->{columns}}) {
+                  push @newcols,$_ unless $_->{name} eq '*';
+	      }
+              $self->{columns} = \@newcols;
+	  }
+       }
+       else {
+           if (!$table) {
+               return $self->doErr("Ambiguous column name '$c'")
+                   if $is_duplicate{$c};
+               return $self->doErr("No such column '$c'")
+               unless $short_exists{$c};
+               $table = $short_exists{$c};
+               $col   = $c;
+           }
+           else {
+               return $self->doErr("No such column '$table.$col'")
+                     unless $col_exists{$table.'.'.$col};
+           }
+           next if $is_fully->{"$table.$col"};
+           $self->{columns}->[$i]->{table} = $table;
+           push @$fully_qualified_cols, "$table.$col";
+           $is_fully->{"$table.$col"}++;
+       }
+    }
+    return $fully_qualified_cols;
+}
+
+sub distinct {
+    my $self = shift;
+    return 1 if $self->{set_quantifier}
+       and $self->{set_quantifier} eq 'DISTINCT';
+    return 0;
+}
 
 
-package SQL::Statement::Table;
+sub command { shift->{command} }
 
-sub name ($) { shift->{'table'}; }
+sub params {
+    my $self = shift;
+    my $val_num = shift;
+    if (!$self->{params}) { return 0; }
+    if (defined $val_num) {
+        return $self->{params}->[$val_num];
+    }
+    if (wantarray) {
+        return @{$self->{params}};
+    }
+    else {
+        return scalar @{ $self->{params} };
+    }
 
+}
+sub row_values {
+    my $self = shift;
+    my $val_num = shift;
+    if (!$self->{values}) { return 0; }
+    if (defined $val_num) {
+        #        return $self->{values}->[$val_num]->{value};
+        return $self->{values}->[$val_num];
+    }
+    if (wantarray) {
+        return map{$_->{values} } @{$self->{values}};
+    }
+    else {
+        return scalar @{ $self->{values} };
+    }
 
-package SQL::Statement::Ident;
+}
 
-sub id ($) { shift->{'id'}; }
+sub get_row_value {
+    my($self,$structure,$eval,$rowhash) = @_;
+    my $type = $structure->{type};
+    $type = $structure->{name} if $type and $type eq 'function';
+    return undef unless $type;
+    for ( $type ) {
+        /string|number|null/      &&do { return $structure->{value} };
+        /column/                  &&do {
+                my $val = $structure->{value};
+                my $tbl;
+                if ($self->{join}) {
+ 		    if ($val =~ /^(.+)\.(.+)$/ ) {
+                      ($tbl,$val) = ($1,$2);
+		    }
+                    # $tbl = 'shared' if $eval->is_shared($val);
+                    $tbl ||= $self->colname2table($val);
+                    $val = $tbl . "$dlm$val";
+		}
+                return $rowhash->{$val};
+	};
+        /placeholder/             &&do {
+           my $val;
+           if ($self->{join}) {
+               $val = $self->params($arg_num);
+             }
+           else {
+                $val = $eval->param($arg_num);  
+}
 
+         #my @params = $self->params;
+         #die "@params";
+         #print "$val ~ $arg_num\n";
+                $arg_num++;
+                return $val;
+        };
+        /str_concat/              &&do {
+                my $valstr ='';
+        	for (@{ $structure->{value} }) {
+                    $valstr .= $self->get_row_value($_,$eval,$rowhash);
+	        }
+                return $valstr;
+        };
+        /numeric_exp/             &&do {
+           my @vals = @{ $structure->{vals} };
+           my $str  = $structure->{str};
+           for my $i(0..$#vals) {
+               my $val = $self->get_row_value($vals[$i],$eval,$rowhash);
+               return $self->doErr(
+                   qq{Bad numeric expression '$vals[$i]->{value}'!}
+               ) unless defined $val and $val =~ $numexp;
+               $str =~ s/\?$i\?/$val/;
+	   }
+           $str =~ s/\s//g;
+           return eval $str;
+        };
 
-package SQL::Statement::Op;
+#z      my $vtype = $structure->{value}->{type};
+        my $vtype = $structure->{type};
+#z
 
-sub neg ($) { shift->{'neg'}; }
-sub op ($) { SQL::Statement->op(shift->{'op'}); }
-sub arg1 ($) { my($self) = shift; $self->{'stmt'}->val($self->{'arg1'}); }
-sub arg2 ($) { my($self) = shift; $self->{'stmt'}->val($self->{'arg2'}); }
+        my $value = $structure->{value}->{value};
+        $value = $self->get_row_value($structure->{value},$eval,$rowhash)
+               if $vtype eq 'function';
+        /UPPER/                   &&do {
+                return uc $value;
+        };
+        /LOWER/                   &&do {
+                return lc $value;
+        };
+        /TRIM/                    &&do {
+                my $trim_char = $structure->{trim_char} || ' ';
+                my $trim_spec = $structure->{trim_spec} || 'BOTH';
+                $trim_char = quotemeta($trim_char);
+                if ($trim_spec =~ /LEADING|BOTH/ ) {
+                    $value =~ s/^$trim_char+(.*)$/$1/;
+		}
+                if ($trim_spec =~ /TRAILING|BOTH/ ) {
+                    $value =~ s/^(.*[^$trim_char])$trim_char+$/$1/;
+		}
+                return $value;
+            };
+        /SUBSTRING/                   &&do {
+                my $start  = $structure->{start}->{value} || 1;
+                my $offset = $structure->{length}->{value} || length $value;
+                return substr($value,$start-1,$offset);
+        };
+    }
+}
 
+sub columns {
+    my $self = shift;
+    my $col_num = shift;
+    if (!$self->{columns}) { return 0; }
+    if (defined $col_num ) {
+        return $self->{columns}->[$col_num];
+    }
+    if (wantarray) {
+        return @{$self->{columns}};
+    }
+    else {
+        return scalar @{ $self->{columns} };
+    }
 
-package SQL::Statement::Param;
+}
 
-sub num ($) { shift->{'num'}; }
+sub colname2table {
+    my $self = shift;
+    my $col_name = shift;
+    return undef unless defined $col_name;
+    my $found;
+    my $table;
+    my $name;
+    my @cur_cols;
+    for my $c(@{$self->{columns}}) {
+         $name  = $c->{name};
+         $table = $c->{table};
+         push @cur_cols,$name;
+         #next unless $name eq $col_name;
+         last if $name eq $col_name;
+         $found++
+    }
+    #print "$table - $name - $col_name\n";
+    return $table;
+    #print "$col_name $table @cur_cols\n";
+    if ($found and $found > 1) {
+        for (@{$self->{join}->{keycols}}) {
+            return 'shared' if /^$col_name$/;
+        }
+        # return $self->doErr("Ambiguous column name '$col_name'!");
+    }
 
+    #    print "$table ~ $col_name ~ @cur_cols\n";
+    return $table;
+}
+
+sub verify_order_cols {
+    my $self = shift;
+    return unless $self->{sort_spec_list};
+    my @cols = $self->order;
+    for my $colnum(0..$#cols) {
+        my $col = $self->order($colnum);
+        if (!defined $col->table) {
+            $self->{sort_spec_list}->[$colnum]->{col}->{table} =
+               $self->columns($colnum)->{table};
+        }
+    }
+}
+
+sub order {
+    my $self = shift;
+    my $o_num = shift;
+    if (!defined $self->{sort_spec_list}) { return (); }
+    if (defined $o_num) {
+        return $self->{sort_spec_list}->[$o_num];
+    }
+    if (wantarray) {
+        return @{$self->{sort_spec_list}};
+    }
+    else {
+        return scalar @{ $self->{sort_spec_list} };
+    }
+
+}
+sub tables {
+    my $self = shift;
+    my $table_num = shift;
+    if (defined $table_num) {
+        return $self->{tables}->[$table_num];
+    }
+    if (wantarray) {
+        return @{ $self->{tables} };
+    }
+    else {
+#        return scalar @{ $self->{table_names} };
+        return scalar @{ $self->{tables} };
+    }
+
+}
+sub doErr {
+    my $self = shift;
+    my $err  = shift;
+    my $errtype  = shift;
+    my @c = caller 6;
+    #$err = "[" . $self->{original_string} . "]\n$err\n\n";
+    #    $err = "$err\n\n";
+    my $prog = $c[1];
+    my $line = $c[2];
+    $prog = defined($prog) ? " called from $prog" : '';
+    $prog .= defined($line) ? " at $line" : '';
+    $err =  "\nExecution ERROR: $err$prog.\n\n";
+
+    $self->{errstr} = $err;
+    warn $err if $self->{PrintError};
+    # print $err if $self->{PrintError};
+    die "\n" if $self->{RaiseError};
+    return undef;
+}
+
+sub errstr {
+    my $self = shift;
+    $self->{errstr};
+}
+
+package SQL::Statement::TempTable;
+
+sub new {
+    my $class      = shift;
+    my $name       = shift;
+    my $col_names  = shift;
+    my $table_cols = shift;
+    my $table      = shift;
+    my $col_nums;
+    for my $i(0..scalar @$col_names -1) {
+      $col_nums->{$col_names->[$i]}=$i;
+    }
+    my @display_order = map { $col_nums->{$_} } @$table_cols;
+    my $self = {
+        col_names  => $col_names,
+        table_cols => \@display_order,
+        col_nums   => $col_nums,
+        table      => $table,
+        NAME       => $name,
+    };
+    return bless $self, $class;
+}
+#sub is_shared {my($s,$colname)=@_;return $s->{is_shared}->{$colname}}
+sub col_nums { shift->{col_nums} }
+sub col_names { shift->{col_names} }
+sub column_num  { 
+    my($s,$col) = @_;
+    $col = $s->{col_nums}->{$col};
+}
+sub fetch_row { my $s=shift; return shift @{ $s->{table} } }
 
 package SQL::Statement::Order;
 
@@ -377,35 +1369,72 @@ package SQL::Statement::Limit;
 
 sub new ($$) {
     my $proto = shift;
-    my $self = {@_};
+    my $self  = shift;
     bless($self, (ref($proto) || $proto));
 }
-sub limit ($) { shift->{'limi'}; }
-sub offset ($) { shift->{'off'}; }
+sub limit ($) { shift->{'limit'}; }
+sub offset ($) { shift->{'offset'}; }
 
+package SQL::Statement::Param;
 
-package SQL::Parser;
-
-sub new ($;$$) {
-    my($class, $name, $attr) = @_;
-    my($self) = $class->dup($name);
-    if ($self  &&  $attr) {
-	my($set, $setVal, $feature, $featureVal);
-	while (($set, $setVal) = each %$attr) {
-	    while (($feature, $featureVal) = each %$setVal) {
-		$self->feature($set, $feature, $featureVal);
-	    }
-	}
-    }
-    $self;
+sub new {
+    my $class = shift;
+    my $num   = shift;
+    my $self = { 'num' => $num };
+    return bless $self, $class;
 }
 
+sub num ($) { shift->{'num'}; }
+
+
+package SQL::Statement::Column;
+
+sub new {
+    my $class = shift;
+    my $col_name = shift;
+    my $tables = shift;
+    my $table_name = $col_name;
+    #my @c = caller 0; print $c[2];
+    if (ref $col_name eq 'HASH') {
+        $tables   = [ $col_name->{table} ];
+        $col_name = $col_name->{column}  ;
+    }
+    # print " $col_name !\n";
+    my $num_tables = scalar @{ $tables };
+    if ($table_name && $table_name =~ /^([^.]*)\.(.*)$/) {
+        $table_name = $1;
+        $col_name = $2;
+    }
+    elsif ($num_tables == 1) {
+        $table_name = $tables->[0];
+    }
+    else {
+        undef $table_name;
+    }
+    my $self = {
+        name => $col_name,
+        table => $table_name,
+    };
+    return bless $self, $class;
+}
+
+sub name  { shift->{name} }
+sub table { shift->{table} }
+
+package SQL::Statement::Table;
+
+sub new {
+    my $class = shift;
+    my $table_name = shift;
+    my $self = {
+        name => $table_name,
+    };
+    return bless $self, $class;
+}
+
+sub name  { shift->{name} }
 1;
-
-
 __END__
-
-=pod
 
 =head1 NAME
 
@@ -422,10 +1451,10 @@ SQL::Statement - SQL parsing and processing engine
     $@ = '';
     my ($stmt) = eval {
         SQL::Statement->new("SELECT id, name FROM foo WHERE id > 1",
-			    $parser);
+                            $parser);
     };
     if ($@) {
-	die "Cannot parse statement: $@";
+        die "Cannot parse statement: $@";
     }
 
     # Query the list of result columns;
@@ -442,7 +1471,6 @@ SQL::Statement - SQL parsing and processing engine
     # SQL::Statement::Op instance
     my $where = $stmt->where();
 
-
     # Evaluate the WHERE clause with concrete data, represented
     # by an SQL::Eval object
     my $result = $stmt->eval_where($eval);
@@ -455,6 +1483,11 @@ SQL::Statement - SQL parsing and processing engine
 
 For installing the module, see L<"INSTALLATION"> below.
 
+At the moment this POD is lifted straight from Jochen
+Wiedmann's SQL::Statement with the exception of the
+section labeled L<"PURE PERL VERSION"> below which is
+a must read.
+
 The SQL::Statement module implements a small, abstract SQL engine. This
 module is not usefull itself, but as a base class for deriving concrete
 SQL engines. The implementation is designed to work fine with the
@@ -465,6 +1498,64 @@ By parsing an SQL query you create an SQL::Statement instance. This
 instance offers methods for retrieving syntax, for WHERE clause and
 statement evaluation.
 
+=head1 PURE PERL VERSION
+
+This version is a pure perl version of Jochen's original SQL::Statement.  Eventually I will re-write the POD but for now I will document in this section the ways it differs from Jochen's version only and you can assume that things not mentioned in this section remain as described in the rest of this POD.
+
+=head2 Dialect Files
+
+In the ...SQL/Dialect directory are files that define the valid types, reserved words, and other features of the dialects.  Currently the ANSI dialect is available only for prepare() not execute() while the CSV and AnyData dialect support both prepare() and execute().
+
+=head2 New flags
+
+In addition to the dialect files, features of SQL::Statement can be defined by flags sent by subclasses in the call to new, for example:
+
+   my $stmt = SQL::Statement->new($sql_str,$flags);
+
+   my $stmt = SQL::Statement->new($sql_str, {text_numbers=>1});
+
+=over
+
+=item  dialect
+
+ Dialect is one of 'ANSI', 'CSV', or 'AnyData'; the default is CSV,
+ i.e. the behaviour of the original XS SQL::Statement.
+
+=item  text_numbers
+
+ If true, this allows texts that look like numbers (e.g. 2001-01-09
+ or 15.3.2) to be sorted as text.  In the original version these
+ were treated as numbers and threw warnings as well as failed to sort
+ as text.  The default is false, i.e. the original behaviour.  The
+ AnyData dialect sets this to true by default, i.e. it allows sorting
+ of these kinds of columns.
+
+=item alpha_compare
+
+ If true this allows alphabetic comparison.  The original version would
+ ignore SELECT statements with clauses like "WHERE col3 < 'c'".  The
+ default is false, i.e. the original style.  The AnyData dialect sets
+ this to true by default, i.e. it allows such comparisons.
+
+=item LIMIT
+
+ The LIMIT clause as described by Jochen below never actually made it
+ into the execute() portion of his SQL::Statement, it is now supported.
+
+=item RLIKE
+
+ There is an experimental RLIKE operator similar to LIKE but takes a
+ perl regular expression, e.g.
+
+      SELECT * FROM foo WHERE bar RLIKE '^\s*Baz[^:]*:$'
+
+ Currently this is only available in the AnyData dialect.
+
+=back
+
+=head2 It's Pure Perl
+
+All items in the pod referring to yacc, C, bison, etc. are now only historical since this version has ported all of those portions into perl.
 
 =head2 Creating a parser object
 
@@ -518,10 +1609,10 @@ The C<new> method allows a shorthand for setting features. For example,
 the following is equivalent to the I<SQL::Statement> parser:
 
   $parser = SQL::Statement->new('Ansi',
-				{ 'create' => { 'type_text' => 1,
-						'type_real' => 1,
-						'type_blob' => 1 },
-				  'select' => { 'join' => 0 }});
+                                { 'create' => { 'type_text' => 1,
+                                                'type_real' => 1,
+                                                'type_blob' => 1 },
+                                  'select' => { 'join' => 0 }});
 
 
 =head2 Parsing a query
@@ -605,6 +1696,7 @@ C<SQL::Statement::Table>.  For I<UPDATE>, I<DELETE>, I<INSERT>,
 I<CREATE> and I<DROP>, a single table will always be returned.
 I<SELECT> statements can return more than one table, in case
 of joins. Table objects offer a single method, C<name> which
+
 returns the table name.
 
 =item params
@@ -628,7 +1720,7 @@ usefull ... :-)
     my $rowValueNum = $stmt->row_values(); # Scalar context
     my @rowValues = $stmt->row_values();   # Array context
     my($rval1, $rval2) = ($stmt->row_values(0),
-			  $stmt->row_values(1));
+                          $stmt->row_values(1));
 
 This method is used for statements like
 
@@ -944,42 +2036,9 @@ such boolean expressions or NOT to negate them.
 
 =head1 INSTALLATION
 
-Like most other Perl modules, you simply do a
+For the moment, just unpack the tarball in a private directory.  For the moment, I suggest this be somewhere other than where you store your current SQL::Statement and you use this version by a "use lib" referencing the private directory where you unpack it.
 
-    perl Makefile.PL
-    make		(nmake or dmake, if you are using Win32)
-    make test		(Let me know, if any tests fail)
-    make install
-
-Known problems are:
-
-=over 8
-
-=item *
-
-Some flavours of SCO Unix don't seem to have alloca() or something similar.
-I recommend using gcc or egcs for compiling Perl and the SQL::Statement
-module: Both compilers have a builtin alloca().
-
-Another option could be to use external alloca.c, for example
-
-  http://www.pu.informatik.th-darmstadt.de/FTP/pub/pu/alloca.c
-  http://www.cs.purdue.edu/homes/young/src2www-example/alloca.c.html
-
-I did test neither of them and cannot give detailed instructions for
-including them into the SQL::Statement module. However, it should
-be sufficient to compile alloca.c with the same instructions than,
-for example, sql_yacc.c and finally repeat the linker command by
-inserting alloca.o after sql_yacc.o.
-
-Note that I cannot modify the sources to work without alloca(), as it is
-the bison parser that's using alloca() and I don't have the bison generated
-code in my hands.
-
-My thanks to Theo Petersen, <theo@acsp.com>, for pointing out this problem
-and the possible workarounds.
-
-=back
+There's no Makefile at this time.
 
 
 =head1 INTERNALS
@@ -1077,8 +2136,8 @@ Second, add your feature to sql_yacc.y. If your feature needs to
 extend the lexer, do it like this:
 
     if (FEATURE(misc, myfeature) {
-	/*  Scan your new symbols  */
-	...
+        /*  Scan your new symbols  */
+        ...
     }
 
 See the I<BOOL> symbol as an example.
@@ -1086,7 +2145,7 @@ See the I<BOOL> symbol as an example.
 If you need to extend the parser, do it like this:
 
     my_new_rule:
-	/*  NULL, old behaviour, doesn't use my feature  */
+        /*  NULL, old behaviour, doesn't use my feature  */
         | my_feature
             { YFEATURE(misc, myfeature); }
     ;
@@ -1117,7 +2176,7 @@ you don't grant serialized access. Per-thread handles are always safe.
 
 =head1 AUTHOR AND COPYRIGHT
 
-This module is Copyright (C) 1998 by
+The original version of this module is Copyright (C) 1998 by
 
     Jochen Wiedmann
     Am Eisteich 9
@@ -1126,6 +2185,12 @@ This module is Copyright (C) 1998 by
 
     Email: joe@ispsoft.de
     Phone: +49 7123 14887
+
+The current version is Copyright (c) 2001 by
+
+    Jeff Zucker
+
+    Email: jeff@vpservices.com
 
 All rights reserved.
 
@@ -1136,6 +2201,6 @@ the Perl README file.
 
 =head1 SEE ALSO
 
-L<DBI(3)>, L<DBD::CSV(3)>
+L<DBI(3)>, L<DBD::CSV(3)>, L<DBD::AnyData>
 
 =cut
