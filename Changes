@@ -1,5 +1,28 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.003, released 01 March, 2002
+------------------------------------------
+
+ * identifiers (names of columns, tables, and table name
+   aliases) are now all case insensitive as required by the SQL
+   standard. all older versions including the XS versions used
+   case sensitive column names
+
+ * added numerous examples to test.pl
+   
+ * improved and/or fixed bugs in:
+
+   * placeholder support
+     Thanks Achim Grolms <Achim.Grolms@fujitsu-siemens.com>
+
+   * ORDER BY clause
+     Thanks Jan Stocker <jstocker@tzi.de>
+
+   * LIKE/CLIKE/RLIKE/IN predicates
+     Thanks Udo Beckmann <Udo.Beckmann@trinkaus.de>
+
+   * table name aliases in explicit joins
+
 Version 1.002, released 5 February, 2002
 ----------------------------------------
 

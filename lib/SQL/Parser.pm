@@ -12,7 +12,7 @@ package SQL::Parser;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '1.002';
+$VERSION = '1.003';
 
 
 #############################
@@ -40,6 +40,7 @@ sub new {
 sub parse {
     my $self = shift;
     my $sql = shift;
+#printf "<%s>", $self->{dialect_set};
     $self->dialect( $self->{"dialect"} )  unless $self->{"dialect_set"};
     $sql =~ s/^\s+//;
     $sql =~ s/\s+$//;
@@ -134,6 +135,7 @@ sub list {
 sub dialect {
     my($self,$dialect) = @_;
     return $self->{"dialect"} unless $dialect;
+    return $self->{"dialect"} if $self->{dialect_set};
     $self->{"opts"} = {};
     my $mod = "SQL/Dialects/$dialect.pm";
     undef $@;
@@ -242,7 +244,7 @@ sub SELECT {
     $str =~ s/^SELECT (.+)$/$1/i;
     if ( $str =~ s/^(.+) LIMIT (.+)$/$1/i ) { $limit_clause = $2; }
     if ( $str =~ s/^(.+) ORDER BY (.+)$/$1/i     ) { $order_clause = $2; }
-    if ( $str =~ s/^(.+) WHERE (.+)$/$1/i        ) { $where_clause = $2; }
+    if ( $str =~ s/^(.+?) WHERE (.+)$/$1/i        ) { $where_clause = $2; }
     if ( $str =~ s/^(.+?) FROM (.+)$/$1/i        ) { $from_clause  = $2; }
     else {
         return $self->do_err("Couldn't find FROM clause in SELECT!");
@@ -299,7 +301,13 @@ sub EXPLICIT_JOIN {
     my $remainder = shift;
     return undef unless $remainder;
     my($tableA,$tableB,$keycols,$jtype,$natural);
-    ($tableA,$remainder) = $remainder =~ /^(\S+) (.*)/;
+    if ($remainder =~ /^(.+?) (NATURAL|INNER|LEFT|RIGHT|FULL|UNION|JOIN)(.+)$/s){
+        $tableA = $1;
+        $remainder = $2.$3;
+    }
+    else {
+        ($tableA,$remainder) = $remainder =~ /^(\S+) (.*)/;
+    }
         if ( $remainder =~ /^NATURAL (.+)/) {
             $self->{"struct"}->{"join"}->{"clause"} = 'NATURAL';
             $natural++;
@@ -353,7 +361,7 @@ sub EXPLICIT_JOIN {
 	          }
               }
           }
-          elsif ($remainder =~ /^(\S+)(.*)/) {
+          elsif ($remainder =~ /^(.+?)$/i) {
   	      $tableB = $1;
               $remainder = $2;
           }
@@ -447,6 +455,12 @@ sub UPDATE {
     if ($where_clause) {
         return undef unless $self->SEARCH_CONDITION($where_clause);
     }
+    my @vals = @{$self->{"struct"}->{"values"}};
+    my $num_val_placeholders=0;
+    for my $v(@vals) {
+       $num_val_placeholders++ if $v->{"type"} eq 'placeholder';
+    }
+    $self->{"struct"}->{"num_val_placeholders"}=$num_val_placeholders;
     return 1;
 }
 
@@ -577,7 +591,9 @@ sub SELECT_LIST {
     }
     my(@newcols,$newcol);
     for my $col(@col_list) {
-        $col = trim($col);
+#        $col = trim($col);
+    $col =~ s/^\s+//;
+    $col =~ s/\s+$//;
         if ($col =~ /^(\S+)\.\*$/) {
             my $table = $1;
             return undef unless $self->TABLE_NAME($table);
@@ -631,7 +647,10 @@ sub SET_FUNCTION_SPEC {
 
 sub LIMIT_CLAUSE {
     my($self,$limit_clause) = @_;
-    $limit_clause = trim($limit_clause);
+#    $limit_clause = trim($limit_clause);
+    $limit_clause =~ s/^\s+//;
+    $limit_clause =~ s/\s+$//;
+
     return 1 if !$limit_clause;
     my($offset,$limit,$junk) = split /,/, $limit_clause;
     return $self->do_err('Bad limit clause!')
@@ -660,6 +679,7 @@ sub SORT_SPEC_LIST {
         my($self,$order_clause) = @_;
         return 1 if !$order_clause;
         my %is_table_name = %{$self->{"tmp"}->{"is_table_name"}};
+        my %is_table_alias = %{$self->{"tmp"}->{"is_table_alias"}};
         my @ocols;
         my @order_columns = split ',',$order_clause;
         for my $col(@order_columns) {
@@ -680,7 +700,7 @@ sub SORT_SPEC_LIST {
             return undef if !($newcol = $self->COLUMN_NAME($newcol));
             if ($newcol =~ /^(.+)\..+$/s ) {
               my $table = $1;
-	      if (!$is_table_name{$table}) {
+	      if (!$is_table_name{"\L$table"} and !$is_table_alias{"\L$table"} ) {
                 return $self->do_err( "Table '$table' in ORDER BY clause "
                              . "not in FROM clause."
                              );
@@ -755,21 +775,32 @@ sub get_btwn {
 
 # get IN clause
 #
+#  a IN (b,c)     -> (a=b OR a=c)
+#  a NOT IN (b,c) -> (a<>b AND a<>c)
+#
 sub get_in {
     my $str = shift;
+    my $in_inside_parens;
     if ($str =~ /^(.+?) IN (\(.+)$/i ) {
         my($col,$in,$out,$contents);
         my $front = $1;
         my $back  = $2;
-        my $not = 1 if $front =~ s/^(.+) NOT$/$1/i;
+        my $not;
+        $not++ if $front =~ s/^(.+) NOT$/$1/i;
         if ($front =~ s/^(.+? )(AND|OR|\() (.+)$/$1$2/i) {
             $col = $3;
 	} 
         else {
             $col = $front;
+            $not++ if $col =~ s/^NOT (.+)/$1/i;
             $front = '';
 	}
-        $front .= " NOT" if $not;
+            if ( $col =~ s/^\(// ) {
+                $in_inside_parens++;
+	    }
+#print "~$not~\n";
+ #       $front .= " NOT" if $not;
+#        $not++ if $front =~ s/^(.+) NOT$/$1/i;
         my @chars = split '', $back;
         for (0..$#chars) {
             my $char = shift @chars;
@@ -781,15 +812,29 @@ sub get_in {
 	    }
 	}
         $back = join '', @chars;
+        $back =~ s/\)$// if $in_inside_parens;
+        # print "\n[$front][$col][$contents][$back]\n";
+        #die "\n[$contents]\n";
         $contents =~ s/^\(//;
         $contents =~ s/\)$//;
         my @vals = split /,/, $contents;
-        @vals = map { "$col = $_" } @vals;
-        my $valStr = join " OR ", @vals;
+my $op       = '=';
+my $combiner = 'OR';
+if ($not) {
+    $op       = '<>';
+    $combiner = 'AND';
+}
+        @vals = map { "$col $op $_" } @vals;
+        my $valStr = join " $combiner ", @vals;
         $str = "$front ($valStr) $back";
         $str =~ s/\s+/ /g;
         return get_in($str);
     }
+$str =~ s/^\s+//;
+$str =~ s/\s+$//;
+$str =~ s/\(\s+/(/;
+$str =~ s/\s+\)/)/;
+#print "$str:\n";
     return $str;
 }
 
@@ -800,6 +845,16 @@ sub parens_search {
     my $str  = shift;
     my $predicates = shift;
     my $index = scalar @$predicates;
+
+# to handle WHERE (a=b) AND (c=d)
+    if ($str =~ /\(([^()]+?)\)/ ) {
+        my $pred = quotemeta $1;
+        if ($pred !~ / (AND|OR) / ) {
+          $str =~ s/\(($pred)\)/$1/;
+        }
+    }
+#
+
     if ($str =~ s/\(([^()]+)\)/^$index^/ ) {
         push @$predicates, $1;
     }
@@ -843,6 +898,11 @@ sub non_parens_search {
         };
     }
     else {
+        my $xstr = $str;
+        $xstr =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g;
+        my($k,$v) = $xstr =~ /^(\S+?)\s+\S+\s*(.+)\s*$/;
+        #print "$k,$v\n" if defined $k;
+        push @{ $self->{struct}->{where_cols}->{$k}}, $v if defined $k;
         return $self->PREDICATE($str);
     }
 }
@@ -940,7 +1000,11 @@ sub LITERAL {
     my $str  = shift;
     return 'null' if $str =~ /^NULL$/i;    # NULL
     return 'empty_string' if $str =~ /^~E~$/i;    # NULL
-    return 'placeholder' if $str eq '?';   # placeholder question mark
+    if ($str eq '?') {
+          $self->{struct}->{num_placeholders}++;
+          return 'placeholder';
+    } 
+#    return 'placeholder' if $str eq '?';   # placeholder question mark
     return 'string' if $str =~ /^'.*'$/s;  # quoted string
     return 'number' if $str =~             # number
        /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
@@ -1122,11 +1186,17 @@ sub ROW_VALUE {
             $value    = $2;
             if ($front =~ /^\s*(TRAILING|LEADING|BOTH)(.*)$/i ) {
                 $trim_spec = uc $1;
-                $trim_char = trim($2);
+#                $trim_char = trim($2);
+    $trim_char = $2;
+    $trim_char =~ s/^\s+//;
+    $trim_char =~ s/\s+$//;
                 undef $trim_char if length($trim_char)==0;
 	    }
             else {
-	        $trim_char = trim($front);
+#	        $trim_char = trim($front);
+    $trim_char = $front;
+    $trim_char =~ s/^\s+//;
+    $trim_char =~ s/\s+$//;
 	    }
 	}
         $trim_char =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g if $trim_char;
@@ -1185,13 +1255,14 @@ sub ROW_VALUE {
     # COLUMN NAME
     #
     return undef unless $str = $self->COLUMN_NAME($str);
-    if ( $str =~ /^(.*)\./ && !$self->{"tmp"}->{"is_table_name"}->{$1}) {
+    if ( $str =~ /^(.*)\./ && !$self->{"tmp"}->{"is_table_name"}->{"\L$1"}
+       and !$self->{"tmp"}->{"is_table_alias"}->{"\L$1"} ) {
         return $self->do_err(
             "Table '$1' in WHERE clause not in FROM clause!"
         );
     }
-    push @{ $self->{"struct"}->{"where_clause"}->{"cols"}},$str
-       unless $self->{"tmp"}->{"where_cols"}->{"$str"};
+#    push @{ $self->{"struct"}->{"where_cols"}},$str
+#       unless $self->{"tmp"}->{"where_cols"}->{"$str"};
     $self->{"tmp"}->{"where_cols"}->{"$str"}++;
     return { type => 'column', value => $str };
 }
@@ -1209,10 +1280,13 @@ sub COLUMN_NAME {
       }
       $table_name = $1;
       $col_name   = $2;
-      my $alias = $self->{"struct"}->{"table_alias"}->{"$table_name"};
-      $table_name = $alias if $alias;
+#      my $alias = $self->{struct}->{table_alias} || [];
+#      $table_name = shift @$alias if $alias;
+#print "$table_name : $alias";
       return undef unless $self->TABLE_NAME($table_name);
-      if (!$self->{"tmp"}->{"is_table_name"}->{"$table_name"}) {
+      if (!$self->{"tmp"}->{"is_table_name"}->{"\L$table_name"}
+       and !$self->{"tmp"}->{"is_table_alias"}->{"\L$table_name"}
+         ) {
           $self->do_err(
                 "Table '$table_name' referenced but not found in FROM list!"
           );
@@ -1222,8 +1296,15 @@ sub COLUMN_NAME {
     else {
       $col_name = $str;
     }
-    $col_name = trim($col_name);
-    return undef unless $col_name eq '*' or $self->IDENTIFIER(trim($col_name));
+#    $col_name = trim($col_name);
+    $col_name =~ s/^\s+//;
+    $col_name =~ s/\s+$//;
+    return undef unless $col_name eq '*' or $self->IDENTIFIER($col_name);
+#
+# MAKE COL NAMES ALL LOWER CASE
+    $col_name = lc $col_name;
+#
+#
     $col_name = "$table_name.$col_name" if $table_name;
     return $col_name;
 }
@@ -1241,7 +1322,10 @@ sub COLUMN_NAME_LIST {
     my @newcols;
     my $newcol;
     for my $col(@col_list) {
-        return undef if !($newcol = $self->COLUMN_NAME(trim($col)));
+    $col =~ s/^\s+//;
+    $col =~ s/\s+$//;
+#        return undef if !($newcol = $self->COLUMN_NAME(trim($col)));
+        return undef if !($newcol = $self->COLUMN_NAME($col));
         push @newcols, $newcol;
     }
     $self->{"struct"}->{"column_names"} = \@newcols;
@@ -1263,15 +1347,18 @@ sub TABLE_NAME_LIST {
     ) {
         return $self->do_err('Dialect does not support multiple tables!');
     }
+    my %is_table_alias;
     for my $table_str(@table_names) {
         my($table,$alias);
         my(@tstr) = split / /,$table_str;
         if    (@tstr == 1) { $table = $tstr[0]; }
         elsif (@tstr == 2) { $table = $tstr[0]; $alias = $tstr[1]; }
+#        elsif (@tstr == 2) { $table = $tstr[1]; $alias = $tstr[0]; }
         elsif (@tstr == 3) {
             return $self->do_err("Can't find alias in FROM clause!")
                    unless uc($tstr[1]) eq 'AS';
             $table = $tstr[0]; $alias = $tstr[2];
+#            $table = $tstr[2]; $alias = $tstr[0];
         }
         else {
 	    return $self->do_err("Can't find table names in FROM clause!")
@@ -1279,11 +1366,18 @@ sub TABLE_NAME_LIST {
         return undef unless $self->TABLE_NAME($table);
         push @tables, $table;
         if ($alias) {
+#die $alias, $table;
             return undef unless $self->TABLE_NAME($alias);
-            $aliases{$alias} = $table;
+#            $aliases{$alias} = $table;
+            push @{$aliases{$table}},"\L$alias";
+            $is_table_alias{"\L$alias"}=1;
 	}
     }
-    my %is_table_name = map { $_ => 1 } @tables,keys %aliases;
+    
+#    my %is_table_name = map { $_ => 1 } @tables,keys %aliases;
+    my %is_table_name = map { lc $_ => 1 } @tables;
+    my %is_table_aliase = map { lc $_ => 1 } @tables;
+    $self->{"tmp"}->{"is_table_alias"}  = \%is_table_alias;
     $self->{"tmp"}->{"is_table_name"}  = \%is_table_name;
     $self->{"struct"}->{"table_names"} = \@tables;
     $self->{"struct"}->{"table_alias"} = \%aliases;
@@ -1317,6 +1411,7 @@ sub TABLE_NAME {
 sub IDENTIFIER {
     my $self = shift;
     my $id   = shift;
+    return 1 if $id =~ /^".+"$/s; # QUOTED IDENTIFIER
     my $err  = "Bad table or column name '$id' ";        # BAD CHARS
     if ($id =~ /\W/) {
         $err .= "has chars not alphanumeric or underscore!";
