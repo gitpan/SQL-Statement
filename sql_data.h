@@ -27,7 +27,8 @@ enum {
     SQL_STATEMENT_ERROR_PARSE,
     SQL_STATEMENT_ERROR_MEM,
     SQL_STATEMENT_ERROR_OUT_OF_BOUNDS,
-    SQL_STATEMENT_ERROR_INTERNAL
+    SQL_STATEMENT_ERROR_INTERNAL,
+    SQL_STATEMENT_ERROR_LIMIT
 };
 
 /*
@@ -44,7 +45,8 @@ enum {
     SQL_STATEMENT_TYPE_TABLE,
     SQL_STATEMENT_TYPE_PARAM,
     SQL_STATEMENT_TYPE_VAL,
-    SQL_STATEMENT_TYPE_ORDER
+    SQL_STATEMENT_TYPE_ORDER,
+    SQL_STATEMENT_TYPE_LIMIT
 };
 
 
@@ -173,6 +175,8 @@ typedef struct sql_stmt_s {
     sql_array_t orderrows;
     sql_eval_data_t* evalData;
     sql_parser_t* parser;
+    long limit_offset;
+    long limit_max;
 } sql_stmt_t;
 
 typedef struct {

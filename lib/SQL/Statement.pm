@@ -3,14 +3,15 @@
 require 5.004;
 use strict;
 
-require DynaLoader;
+use DynaLoader ();
+use SQL::Eval ();
 
 
 package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1017';
+$VERSION = '0.1018';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -372,6 +373,17 @@ sub column ($) { shift->{'col'}->name(); }
 sub desc ($) { shift->{'desc'}; }
 
 
+package SQL::Statement::Limit;
+
+sub new ($$) {
+    my $proto = shift;
+    my $self = {@_};
+    bless($self, (ref($proto) || $proto));
+}
+sub limit ($) { shift->{'limi'}; }
+sub offset ($) { shift->{'off'}; }
+
+
 package SQL::Parser;
 
 sub new ($;$$) {
@@ -402,7 +414,7 @@ SQL::Statement - SQL parsing and processing engine
     require SQL::Statement;
 
     # Create a parser
-    my($parser) = SQL::Statement->new('Ansi');
+    my($parser) = SQL::Parser->new('Ansi');
 
     # Parse an SQL statement
     $@ = '';
@@ -625,7 +637,7 @@ This method is used for statements like
 to read the values $val1, $val2, ... $valN. It returns scalar values
 or SQL::Statement::Param instances.
 
-=item Order
+=item order
 
     my $orderNum = $stmt->order();   # Scalar context
     my @order = $stmt->order();      # Array context
@@ -639,6 +651,28 @@ clause. Example:
 In this case, C<order> could return 2 instances of SQL::Statement::Order.
 You can use the methods C<$o-E<gt>table()>, C<$o-E<gt>column()> and
 C<$o-E<gt>desc()> to examine the order object.
+
+=item limit
+
+    my $l = $stmt->limit();
+    if ($l) {
+      my $offset = $l->offset();
+      my $limit = $l->limit();
+    }
+
+In a SELECT statement you can use a C<LIMIT> clause to implement
+cursoring:
+
+    SELECT * FROM FOO LIMIT 5
+    SELECT * FROM FOO LIMIT 5, 5
+    SELECT * FROM FOO LIMIT 10, 5
+
+These three statements would retrieve the rows 0..4, 5..9, 10..14
+of the table FOO, respectively. If no C<LIMIT> clause is used, then
+the method C<$stmt-E<gt>limit> returns undef. Otherwise it returns
+an instance of SQL::Statement::Limit. This object has the methods
+C<offset> and C<limit> to retrieve the index of the first row and
+the maximum number of rows, respectively.
 
 =item where
 

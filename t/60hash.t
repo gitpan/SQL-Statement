@@ -10,7 +10,7 @@ $^W = 1;
 
 package main;
 
-sub ArrEq($$) {
+sub ArrEq {
     my($arr1, $arr2) = @_;
     if (@$arr1 != @$arr2) {
 	printf("Mismatch in number of cols, %d vs. %d\n", @$arr1, @$arr2);

@@ -3,7 +3,7 @@
 require 5.004;
 use strict;
 
-require SQL::Statement;
+use SQL::Statement ();
 
 
 package SQL::Eval;

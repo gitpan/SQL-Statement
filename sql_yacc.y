@@ -84,6 +84,7 @@ static int _AllocOrderRow(sql_stmt_t* stmt, sql_order_t* o);
 %token DISTINCT
 %token WHERE
 %token ORDER
+%token LIMIT
 %token ASC
 %token DESC
 %token FROM
@@ -113,6 +114,7 @@ static int _AllocOrderRow(sql_stmt_t* stmt, sql_order_t* o);
 %type <scalar_val> row_name
 %type <scalar_val> order_by_item
 %type <scalar_val> order_by_item_commalist
+%type <scalar_val> opt_limit
 %type <scalar_val> create_row
 %type <scalar_val> create_row_commalist
 %type <scalar_val> row_list_name
@@ -191,7 +193,7 @@ key_row_commalist:
 
 select_expression:
   SELECT opt_dist select_item_commalist FROM table_reference_commalist
-    opt_where opt_group opt_having opt_order_by
+    opt_where opt_group opt_having opt_order_by opt_limit
     { ((sql_stmt_t*) stmt)->command = SQL_STATEMENT_COMMAND_SELECT;
       ((sql_stmt_t*) stmt)->hasResult = 1;
     }
@@ -219,6 +221,27 @@ order_by_item:
   | row_name DESC
     { sql_order_t o; o.desc = 1; o.col = $1;
       if (($$ = _AllocOrderRow(stmt, &o))  ==  -1) { YYABORT; }
+    }
+;
+
+opt_limit:
+  /* NULL */
+    { ((sql_stmt_t*) stmt)->limit_offset = -1;
+      ((sql_stmt_t*) stmt)->limit_max = -1;
+    }
+  | LIMIT INTEGERVAL 
+    { if ($2 < 0) {
+        ((sql_stmt_t*) stmt)->errMsg = SQL_STATEMENT_ERROR_LIMIT;
+      }
+      ((sql_stmt_t*) stmt)->limit_offset = 0;
+      ((sql_stmt_t*) stmt)->limit_max = $2;
+    }
+  | LIMIT INTEGERVAL ',' INTEGERVAL
+    { if ($2 < 0  ||  $4 < 0) {
+        ((sql_stmt_t*) stmt)->errMsg = SQL_STATEMENT_ERROR_LIMIT;
+      }
+      ((sql_stmt_t*) stmt)->limit_offset = $2;
+      ((sql_stmt_t*) stmt)->limit_max = $4;
     }
 ;
 
@@ -951,6 +974,16 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 	        stmt->queryPtr = queryPtr + 4;
 		lvalp->operator = SQL_STATEMENT_OPERATOR_LIKE;
 		return OPERATOR;
+	    }
+	    if (queryPtr+5 <= queryEnd  &&
+		(queryPtr[1] == 'i'  ||  queryPtr[1] == 'I')  &&
+		(queryPtr[2] == 'm'  ||  queryPtr[2] == 'M')  &&
+		(queryPtr[3] == 'i'  ||  queryPtr[3] == 'I')  &&
+		(queryPtr[4] == 't'  ||  queryPtr[4] == 'T')  &&
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
+
+	        stmt->queryPtr = queryPtr + 5;
+		return LIMIT;
 	    }
 	    break;
 	  case 'n':

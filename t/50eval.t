@@ -9,6 +9,57 @@ $| = 1;
 $^W = 1;
 
 
+package main;
+
+sub ArrEq {
+    my($arr1, $arr2) = @_;
+    if (@$arr1 != @$arr2) {
+	printf("Mismatch in number of rows, %d vs. %d\n",
+	       scalar(@$arr1), scalar(@$arr2));
+	return 0;
+    }
+    my($elem1, $elem2, $i);
+    $i = 0;
+    while (@$arr1) {
+	$elem1 = shift @$arr1;
+	$elem2 = shift @$arr2;
+	if (ref($elem1)) {
+	    if (!ref($elem2)) {
+		printf("Mismatch in type: ref vs. scalar\n");
+		return 0;
+	    }
+	    if (!ArrEq($elem1, $elem2)) {
+		printf("Mismatch in row $i detected.\n");
+		return 0;
+	    }
+	} else {
+	    if (ref($elem2)) {
+		printf("Mismatch in type: scalar vs. ref\n");
+		return 0;
+	    }
+	    if (defined($elem1)) {
+		if (defined($elem2)) {
+		    if ($elem1 ne $elem2) {
+			printf("Mismatch: $elem1 vs. $elem2\n");
+			return 0;
+		    }
+		} else {
+		    printf("Mismatch: $elem1 vs. undef\n");
+		    return 0;
+		}
+	    } else {
+		if (defined($elem2)) {
+		    printf("Mismatch: $elem1 vs. undef\n");
+		    return 0;
+		}
+	    }
+	}
+	++$i;
+    }
+    1;
+}
+
+
 ############################################################################
 #
 # A subclass of Statement::SQL which implements tables as arrays of
@@ -102,55 +153,6 @@ sub drop ($$) {
 
 
 package main;
-
-sub ArrEq($$) {
-    my($arr1, $arr2) = @_;
-    if (@$arr1 != @$arr2) {
-	printf("Mismatch in number of rows, %d vs. %d\n",
-	       scalar(@$arr1), scalar(@$arr2));
-	return 0;
-    }
-    my($elem1, $elem2, $i);
-    $i = 0;
-    while (@$arr1) {
-	$elem1 = shift @$arr1;
-	$elem2 = shift @$arr2;
-	if (ref($elem1)) {
-	    if (!ref($elem2)) {
-		printf("Mismatch in type: ref vs. scalar\n");
-		return 0;
-	    }
-	    if (!ArrEq($elem1, $elem2)) {
-		printf("Mismatch in row $i detected.\n");
-		return 0;
-	    }
-	} else {
-	    if (ref($elem2)) {
-		printf("Mismatch in type: scalar vs. ref\n");
-		return 0;
-	    }
-	    if (defined($elem1)) {
-		if (defined($elem2)) {
-		    if ($elem1 ne $elem2) {
-			printf("Mismatch: $elem1 vs. $elem2\n");
-			return 0;
-		    }
-		} else {
-		    printf("Mismatch: $elem1 vs. undef\n");
-		    return 0;
-		}
-	    } else {
-		if (defined($elem2)) {
-		    printf("Mismatch: $elem1 vs. undef\n");
-		    return 0;
-		}
-	    }
-	}
-	++$i;
-    }
-    1;
-}
-
 
 my($testNum) = 0;
 

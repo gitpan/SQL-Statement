@@ -1,3 +1,7 @@
+2001-04-17  Jochen Wiedmann  <joe@ispsoft.de> (0.1018)
+
+	* Added LIMIT clause. HAMDOUNI El Bachir <bachir@hamdouni.org>
+
 2001-02-17  Jochen Wiedmann  <joe@ispsoft.de> (0.1017)
 
 	* Makefile.PL: Fixed portability issue with Darwin. Eric Peden

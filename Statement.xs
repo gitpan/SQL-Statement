@@ -37,6 +37,7 @@ static sql_stmt_t* SV2stmt(SV* self) {
     }
 
     croak("%s is not a valid SQL::Statement object", SvPV(self, lna));
+    return NULL; /* Just to make the compiler happy ... */
 }
 
 
@@ -171,6 +172,18 @@ static SV* SqlObject(SV* stmtSV, sql_stmt_t* stmt, void* obj, int type) {
 	    result = newRV_noinc((SV*) hv);
 #ifdef DEBUGGING_MEMORY_LEAK
 	    printf("TYPE_ORDER: Returning %08lx\n", (unsigned long) result);
+#endif
+	    break;
+	}
+      case SQL_STATEMENT_TYPE_LIMIT:
+	{
+	    HV* hv = newHV();
+	    hv_store(hv, "offset", 3, newSViv(stmt->limit_offset) , 0);
+	    hv_store(hv, "limit", 4, newSViv(stmt->limit_max), 0);
+	    bless_package = "SQL::Statement::Limit";
+	    result = newRV_noinc((SV*) hv);
+#ifdef DEBUGGING_MEMORY_LEAK
+	    printf("TYPE_LIMIT: Returning %08lx\n", (unsigned long) result);
 #endif
 	    break;
 	}
@@ -461,6 +474,20 @@ DESTROY(self)
 	free(stmt);
     }
 
+void
+limit(self)
+    SV* self
+  PROTOTYPE: $
+  CODE:
+    {
+        sql_stmt_t* stmt = SV2stmt(self);
+	if (stmt->limit_max == -1) {
+	  ST(0) = &PL_sv_undef;
+	} else {
+	  ST(0) = sv_2mortal(SqlObject(self, stmt, NULL,
+				       SQL_STATEMENT_TYPE_LIMIT));
+	}
+    }
 
 SV*
 command(self)
@@ -713,7 +740,6 @@ order(self, col=NULL)
 	    XSRETURN_UNDEF;
 	}
     }
-
 
 SV*
 where(self)

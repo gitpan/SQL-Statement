@@ -22,4 +22,5 @@ t/30features.t			Feature test
 t/40where.t			WHERE clause evaluation test
 t/50eval.t			Statement evaluation test
 t/60hash.t			Tests for SQL::Statement::Hash
+t/70limit.t			Tests for the LIMIT clause
 test.pl				Benchmark script
