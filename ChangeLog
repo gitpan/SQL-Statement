@@ -1,3 +1,8 @@
+2001-02-17  Jochen Wiedmann  <joe@ispsoft.de> (0.1017)
+
+	* Makefile.PL: Fixed portability issue with Darwin. Eric Peden
+	  <ericpeden@homemail.com>
+
 1999-08-29  Jochen Wiedmann  <joe@ispsoft.de> (0.1016)
 
 	* lib/SQL/Statement.pm: Fixed a portability problem with Perl

@@ -22,7 +22,7 @@ if ($ENV{'USER'} eq 'joe'  &&  $ENV{'HOSTNAME'} eq 'laptop.ispsoft.de') {
 } else {
     $opts{'DEFINE'} = '';
 }
-if ($^O =~ /win/i) {
+if ($^O eq "MSWin32") {
     $opts{'DEFINE'} .= " -Dalloca=_alloca";
 }
 
