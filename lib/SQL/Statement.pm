@@ -11,7 +11,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1020';
+$VERSION = '0.1021';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -404,6 +404,8 @@ sub new ($;$$) {
 
 
 __END__
+
+=pod
 
 =head1 NAME
 

@@ -1,3 +1,8 @@
+2001-11-06  Jochen Wiedmann  <joe@ispsoft.de> (0.1021)
+
+	* Yet another attempt to get rid of those CR/LF
+	  line endings. :-(
+
 2001-04-26  Jochen Wiedmann  <joe@ispsoft.de> (0.1020)
 
 	* Still had CRLF in the generated files. :-(
