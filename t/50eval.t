@@ -106,7 +106,8 @@ package main;
 sub ArrEq($$) {
     my($arr1, $arr2) = @_;
     if (@$arr1 != @$arr2) {
-	printf("Mismatch in number of rows, %d vs. %d\n", @$arr1, @$arr2);
+	printf("Mismatch in number of rows, %d vs. %d\n",
+	       scalar(@$arr1), scalar(@$arr2));
 	return 0;
     }
     my($elem1, $elem2, $i);
@@ -148,7 +149,7 @@ sub Test($) {
 }
 
 
-print "1..56\n";
+print "1..80\n";
 
 my($parser);
 Test($parser = SQL::Parser->new('Ansi'));
@@ -185,6 +186,47 @@ Test(ArrEq($stmt->{'data'},
 	     [ 2, 'Andreas Koenig' ],
 	     [ 3, 'Jonathan Leffler' ],
 	     [ 4, 'Jochen Wiedmann' ] ]));
+
+print "Testing LIKE and CLIKE\n";
+print "LIKE '%a%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE '%a%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'},
+	   [ [ 3, 'Jonathan Leffler' ],
+	     [ 4, 'Jochen Wiedmann' ],
+	     [ 2, 'Andreas Koenig' ] ]));
+print "CLIKE '%a%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name CLIKE '%a%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'},
+	   [ [ 3, 'Jonathan Leffler' ],
+	     [ 4, 'Jochen Wiedmann' ],
+	     [ 2, 'Andreas Koenig' ] ]));
+print "LIKE 'a%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE 'a%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ ]));
+print "CLIKE 'a%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name CLIKE 'a%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ [ 2, 'Andreas Koenig' ] ]));
+print "LIKE '%wied%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE '%wied%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ ]));
+print "CLIKE '%wied%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name CLIKE '%wied%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ [ 4, 'Jochen Wiedmann' ] ]));
+print "LIKE '%Wied%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name LIKE '%Wied%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ [ 4, 'Jochen Wiedmann' ] ]));
+print "CLIKE '%Wied%'\n";
+Test($stmt = MyStatement->new("SELECT * FROM foo WHERE name CLIKE '%wied%'"));
+Test($stmt->execute($db));
+Test(ArrEq($stmt->{'data'}, [ [ 4, 'Jochen Wiedmann' ] ]));
+
 
 Test($stmt = MyStatement->new("SELECT name, id FROM foo ORDER BY id"));
 Test($stmt->execute($db));

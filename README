@@ -39,6 +39,8 @@ SYNOPSIS
         $stmt->execute($data, $params);
 
 DESCRIPTION
+    For installing the module, see the section on "INSTALLATION" below.
+
     The SQL::Statement module implements a small, abstract SQL engine. This
     module is not usefull itself, but as a base class for deriving concrete
     SQL engines. The implementation is designed to work fine with the DBI
@@ -224,7 +226,7 @@ DESCRIPTION
             methods:
 
     op                  returns the operator, one of `AND', `OR', `=', `<>',
-                        `>=', `>', `<=', `<', `LIKE' or `IS'.
+                        `>=', `>', `<=', `<', `LIKE', `CLIKE' or `IS'.
 
     arg1
     arg2                returns the left-hand and right-hand sides of the
@@ -433,9 +435,42 @@ SQL syntax
             [ WHERE $where_clause ] [ ORDER BY $ocol1, ... $ocolM ]
 
     The $where_clause is based on boolean expressions of the form $val1 $op
-    $val2, with $op being one of '=', '<>', '>', '<', '>=', '<=', 'LIKE' or
-    IS. You may use OR, AND and brackets to combine such boolean expressions
-    or NOT to negate them.
+    $val2, with $op being one of '=', '<>', '>', '<', '>=', '<=', 'LIKE',
+    'CLIKE' or IS. You may use OR, AND and brackets to combine such boolean
+    expressions or NOT to negate them.
+
+INSTALLATION
+    Like most other Perl modules, you simply do a
+
+        perl Makefile.PL
+        make                (nmake or dmake, if you are using Win32)
+        make test           (Let me know, if any tests fail)
+        make install
+
+    Known problems are:
+
+    *       Some flavours of SCO Unix don't seem to have alloca() or something
+            similar. I recommend using gcc or egcs for compiling Perl and
+            the SQL::Statement module: Both compilers have a builtin
+            alloca().
+
+            Another option could be to use external alloca.c, for example
+
+              http://www.pu.informatik.th-darmstadt.de/FTP/pub/pu/alloca.c
+              http://www.cs.purdue.edu/homes/young/src2www-example/alloca.c.html
+
+            I did test neither of them and cannot give detailed instructions
+            for including them into the SQL::Statement module. However, it
+            should be sufficient to compile alloca.c with the same
+            instructions than, for example, sql_yacc.c and finally repeat
+            the linker command by inserting alloca.o after sql_yacc.o.
+
+            Note that I cannot modify the sources to work without alloca(),
+            as it is the bison parser that's using alloca() and I don't have
+            the bison generated code in my hands.
+
+            My thanks to Theo Petersen, <theo@acsp.com>, for pointing out
+            this problem and the possible workarounds.
 
 INTERNALS
     Internally the module is splitted into three parts:

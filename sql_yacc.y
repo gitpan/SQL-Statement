@@ -769,7 +769,7 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr[2] == 'c'  ||  queryPtr[2] == 'C')  &&
 		(queryPtr+3 == queryEnd  || !isalnum_(queryPtr[3]))) {
 	        stmt->queryPtr = queryPtr + 3;
-		return ALL;
+		return ASC;
 	    }
 	    break;
 	  case 'b':
@@ -809,6 +809,16 @@ static int ryylex(YYSTYPE* lvalp, void* s) {
 		(queryPtr+4 == queryEnd  || !isalnum_(queryPtr[4]))) {
 	        stmt->queryPtr = queryPtr + 4;
 		return CHAR;
+	    }
+	    if (FEATURE(select, clike)  &&  queryPtr+5 <= queryEnd  &&
+		(queryPtr[1] == 'l'  ||  queryPtr[1] == 'L')  &&
+		(queryPtr[2] == 'i'  ||  queryPtr[2] == 'I')  &&
+		(queryPtr[3] == 'k'  ||  queryPtr[3] == 'K')  &&
+		(queryPtr[4] == 'e'  ||  queryPtr[4] == 'E')  &&
+		(queryPtr+5 == queryEnd  || !isalnum_(queryPtr[5]))) {
+	        stmt->queryPtr = queryPtr + 5;
+		lvalp->operator = SQL_STATEMENT_OPERATOR_CLIKE;
+		return OPERATOR;
 	    }
 	    break;
 	  case 'd':

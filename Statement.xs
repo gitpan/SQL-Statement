@@ -9,7 +9,7 @@
 
 static sql_parser_t sqlEvalParser = {
     { 1, 1, 1 },
-    { 0 }
+    { 0, 1 }
 };
 
 
@@ -252,6 +252,136 @@ static int EvalParam(sql_stmt_t* stmt, sql_val_t* p, sql_cache_t* val) {
     PUTBACK;
     SvREFCNT_dec(pNum);
     return 1;
+}
+
+
+/***************************************************************************
+ *
+ *  Simple Array stringification for SQL::Statement::Hash:
+ *
+ *  Any column starts with a 0x01 byte, followed by the column bytes.
+ *  The bytes 0x00-0x03 are escaped by a preceeding 0x02 byte, and
+ *  incremented by 1, so NUL bytes are never part of the stringified
+ *  array. NULL columns are encoded by a single 0x02 byte (No preceeding
+ *  0x01).
+ *
+ **************************************************************************/
+
+static SV* array2str(AV* av) {
+    STRLEN len = 0;
+    STRLEN plen;
+    char* ptr;
+    char* dptr;
+    SV** svp;
+    int numCols = av_len(av)+1;
+    I32 i;
+    SV* result;
+
+    for (i = 0;  i < numCols;  i++) {
+        ++len;  /*  0x01 byte  */
+	svp = av_fetch(av, i, 0);
+	if (svp  &&  SvOK(*svp)) {
+	    ptr = SvPV(*svp, plen);
+	    while (plen--) {
+	        if (*ptr < 0x04) {
+		    len += 2;
+		} else {
+		    ++len;
+		}
+		++ptr;
+	    }
+	}
+    }
+    len += 1;  /*  Additional NUL  */
+
+    result = newSV(len);
+    SvPOK_on(result);
+    SvCUR_set(result, len-1);
+    dptr = SvPVX(result);
+    for (i = 0;  i < numCols;  i++) {
+	svp = av_fetch(av, i, 0);
+	if (svp  &&  SvOK(*svp)) {
+	    *dptr++ = 0x01;
+	    ptr = SvPV(*svp, plen);
+	    while (plen--) {
+	        if (*ptr < 0x04) {
+		    *dptr++ = 0x02;
+		    *dptr++ = (*ptr++) + 1;
+		} else {
+		    *dptr++ = *ptr++;
+		}
+	    }
+	} else {
+	    *dptr++ = 0x02;  /* undef */
+	}
+    }
+    *dptr++ = '\0';
+    return result;
+}
+
+static AV* str2array(SV* sv) {
+    AV* av = newAV();
+    STRLEN len;
+    STRLEN dlen;
+    char* ptr = SvPV(sv, len);
+    char* dptr;
+    STRLEN i = 0, j;
+    I32 numCols = 0;
+    SV* col;
+
+    if (!sv  ||  !SvOK(sv)) {
+        croak("Expected string (stringified array)");
+    }
+
+    while (i < len) {
+        switch (*ptr++) {
+	  case 0x01:
+	    j = ++i;
+	    dlen = 0;
+	    dptr = ptr;
+	    while (j < len) {
+	        switch (*dptr) {
+		  case 0x01:
+		    j = len;
+		    break;  /* Next column */
+		  case 0x02:
+		    dptr += 2;
+		    j += 2;
+		    ++dlen;
+		    break;
+		  default:
+		    ++dptr;
+		    ++j;
+		    ++dlen;
+		}
+	    }
+	    col = newSV(dlen+1);
+	    SvPOK_on(col);
+	    SvCUR_set(col, dlen);
+	    dptr = SvPVX(col);
+	    while (i < len) {
+	        if (*ptr == 0x01) {
+		    break;  /* Next column  */
+		} else if (*ptr == 0x02) {
+		    ++ptr;
+		    *dptr++ = (*ptr++) - 1;
+		    i += 2;
+		} else {
+		    *dptr++ = *ptr++;
+		    ++i;
+		}
+	    }
+	    av_push(av, col);
+	    break;
+	  case 0x02:
+	    av_push(av, &sv_undef);
+	    ++i;
+	    break;
+	  default:
+	    croak("Error in stringified array, offset %d: Expected column", i);
+	}
+    }
+    return av;
 }
 
 
@@ -800,6 +930,10 @@ feature(self, set, f, val=NULL)
 		    if (strnEQ(fName, "join", 4)) {
 		        fPtr = &parser->select.join;
 		    }
+		} else if (fLen == 5) {
+		    if (strnEQ(fName, "clike", 5)) {
+		        fPtr = &parser->select.clike;
+		    }
 		}
 	    }
 	}
@@ -814,4 +948,30 @@ feature(self, set, f, val=NULL)
 	}
 	XSRETURN_NO;
     }
+
+
+MODULE = SQL::Statement		PACKAGE = SQL::Statement::Hash
+
+SV*
+_array2str(arr)
+    SV* arr
+  PROTOTYPE: $
+  CODE:
+    if (!arr  ||  !SvOK(arr)  ||  !SvROK(arr)  ||
+	SvTYPE(SvRV(arr)) != SVt_PVAV) {
+        croak("_array2str: Expected array ref");
+    }
+    RETVAL = array2str((AV*) SvRV(arr));
+  OUTPUT:
+    RETVAL
+
+
+SV*
+_str2array(str)
+    SV* str
+  PROTOTYPE: $
+  CODE:
+    RETVAL = newRV_noinc((SV*) str2array(str));
+  OUTPUT:
+    RETVAL
 

@@ -5,20 +5,30 @@
 
 sql_parser_t ansiParser = {
     { 0, 0, 0 },
-    { 1 }
+    { 1, 0 }
 };
 
 
-int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2) {
+int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2,
+		       int case_sensitive) {
     char c;
     while (l2) {
         --l2;
         switch (c = *s2++) {
 	  case '\\':
 	    /* Literal match with the following char */
-	    if (!l2--  ||  !l1  ||  *s1++ != *s2++) {
-	        return 0;
+	    if (l2--  &&  l1--) {
+	        char c1 = *s1++;
+	        char c2 = *s2++;
+		if (case_sensitive) {
+		    c1 = tolower(c1);
+		    c2 = tolower(c2);
+		}
+		if (c1 == c2) {
+		    break;
+		}
 	    }
+	    return 0;
 	    break;
 	  case '_':
 	    /* Match anything */
@@ -38,7 +48,7 @@ int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2) {
 	        return 1;
 	    }
 	    while (l1) {
-	        if (SQL_Statement_Like(s1, l1, s2, l2)) {
+	        if (SQL_Statement_Like(s1, l1, s2, l2, case_sensitive)) {
 		    return 1;
 		}
 		++s1;
@@ -46,10 +56,17 @@ int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2) {
 	    }
 	    return 0;
 	  default:
-	    if (!l1  ||  *s1++ != c) {
-	        return 0;
+	    if (l1--) {
+	        char c1 = *s1++;
+		if (case_sensitive) {
+		    c1 = tolower(c1);
+		    c = tolower(c);
+		}
+	        if (c1 == c) {
+		    break;
+		}
 	    }
-	    break;
+	    return 0;
 	}
     }
     return l2 == 0;
@@ -149,6 +166,8 @@ char* SQL_Statement_Op(int op) {
 	return "<";
       case SQL_STATEMENT_OPERATOR_LIKE:
 	return "LIKE";
+      case SQL_STATEMENT_OPERATOR_CLIKE:
+	return "CLIKE";
       case SQL_STATEMENT_OPERATOR_IS:
 	return "IS";
       case SQL_STATEMENT_OPERATOR_AND:

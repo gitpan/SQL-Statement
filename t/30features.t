@@ -25,7 +25,7 @@ sub Parse($$) {
 }
 
 
-print "1..25\n";
+print "1..33\n";
 
 my($ansiParser, $sqlEvalParser, $freeParser, $query);
 Test($ansiParser = SQL::Parser->new("Ansi"));
@@ -61,10 +61,22 @@ Test(!Parse($query, $freeParser));
 
 # Check the join feature
 Test($freeParser->feature("select", "join"));
+Test($ansiParser->feature("select", "join"));
 Test(!$freeParser->feature("select", "join", 0));
 Test(!Parse("SELECT * FROM a, b", $freeParser));
 Test($freeParser->feature("select", "join", 1));
 Test(Parse("SELECT * FROM a, b", $freeParser));
+
+
+# ... and the CLIKE feature
+print "Testing CLIKE feature.\n";
+Test($sqlEvalParser->feature("select", "clike"));
+Test(!$ansiParser->feature("select", "clike"));
+Test(!$freeParser->feature("select", "clike"));
+Test(!$freeParser->feature("select", "clike", 0));
+Test(!Parse("SELECT * FROM a WHERE 'b' CLIKE 'bc'", $freeParser));
+Test($freeParser->feature("select", "clike", 1));
+Test(Parse("SELECT * FROM a WHERE 'b' CLIKE 'bc'", $freeParser));
 
 
 # Check a not existing feature

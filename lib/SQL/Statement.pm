@@ -10,7 +10,7 @@ package SQL::Statement;
 
 use vars qw($VERSION @ISA);
 
-$VERSION = '0.1007';
+$VERSION = '0.1008';
 @ISA = qw(DynaLoader);
 
 bootstrap SQL::Statement $VERSION;
@@ -370,6 +370,8 @@ SQL::Statement - SQL parsing and processing engine
 
 =head1 DESCRIPTION
 
+For installing the module, see L<"INSTALLATION"> below.
+
 The SQL::Statement module implements a small, abstract SQL engine. This
 module is not usefull itself, but as a base class for deriving concrete
 SQL engines. The implementation is designed to work fine with the
@@ -582,7 +584,7 @@ SQL::Statement::Op. The Op instance offers 4 methods:
 =item op
 
 returns the operator, one of C<AND>, C<OR>, C<=>, C<E<lt>E<gt>>, C<E<gt>=>,
-C<E<gt>>, C<E<lt>=>, C<E<lt>>, C<LIKE> or C<IS>.
+C<E<gt>>, C<E<lt>=>, C<E<lt>>, C<LIKE>, C<CLIKE> or C<IS>.
 
 =item arg1
 
@@ -831,8 +833,48 @@ See L<SELECT> below for a decsription of $where_clause
 
 The $where_clause is based on boolean expressions of the form
 $val1 $op $val2, with $op being one of '=', '<>', '>', '<', '>=',
-'<=', 'LIKE' or IS. You may use OR, AND and brackets to combine
+'<=', 'LIKE', 'CLIKE' or IS. You may use OR, AND and brackets to combine
 such boolean expressions or NOT to negate them.
+
+
+=head1 INSTALLATION
+
+Like most other Perl modules, you simply do a
+
+    perl Makefile.PL
+    make		(nmake or dmake, if you are using Win32)
+    make test		(Let me know, if any tests fail)
+    make install
+
+Known problems are:
+
+=over 8
+
+=item *
+
+Some flavours of SCO Unix don't seem to have alloca() or something similar.
+I recommend using gcc or egcs for compiling Perl and the SQL::Statement
+module: Both compilers have a builtin alloca().
+
+Another option could be to use external alloca.c, for example
+
+  http://www.pu.informatik.th-darmstadt.de/FTP/pub/pu/alloca.c
+  http://www.cs.purdue.edu/homes/young/src2www-example/alloca.c.html
+
+I did test neither of them and cannot give detailed instructions for
+including them into the SQL::Statement module. However, it should
+be sufficient to compile alloca.c with the same instructions than,
+for example, sql_yacc.c and finally repeat the linker command by
+inserting alloca.o after sql_yacc.o.
+
+Note that I cannot modify the sources to work without alloca(), as it is
+the bison parser that's using alloca() and I don't have the bison generated
+code in my hands.
+
+My thanks to Theo Petersen, <theo@acsp.com>, for pointing out this problem
+and the possible workarounds.
+
+=back
 
 
 =head1 INTERNALS

@@ -137,8 +137,10 @@ static int SqlEvalStringOp(int o, sql_val_t* arg1, sql_val_t* arg2) {
 	return (l1 == l2)  &&  strncmp(s1, s2, l1) == 0;
       case SQL_STATEMENT_OPERATOR_NE:
 	return (l1 != l2)  ||  strncmp(s1, s2, l1) != 0;
+      case SQL_STATEMENT_OPERATOR_CLIKE:
+	return SQL_Statement_Like(s1, l1, s2, l2, 1);
       case SQL_STATEMENT_OPERATOR_LIKE:
-	return SQL_Statement_Like(s1, l1, s2, l2);
+	return SQL_Statement_Like(s1, l1, s2, l2, 0);
       default:
 	return 0;
     }
@@ -315,6 +317,7 @@ static int SqlEvalOp(sql_stmt_t* stmt, sql_val_t* val) {
 	    result = (arg1->type  ==  SQL_STATEMENT_TYPE_NULL) ? 1 : 0;
 	    break;
 	  case SQL_STATEMENT_OPERATOR_LIKE:
+	  case SQL_STATEMENT_OPERATOR_CLIKE:
 	    /*  This is always string context  */
 	    result = SqlEvalStringOp(o_type, arg1, arg2);
 	    break;

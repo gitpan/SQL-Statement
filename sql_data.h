@@ -59,6 +59,7 @@ enum {
     SQL_STATEMENT_OPERATOR_LT,
     SQL_STATEMENT_OPERATOR_LE,
     SQL_STATEMENT_OPERATOR_LIKE,
+    SQL_STATEMENT_OPERATOR_CLIKE,
     SQL_STATEMENT_OPERATOR_IS,
     SQL_STATEMENT_OPERATOR_AND,
     SQL_STATEMENT_OPERATOR_OR
@@ -150,6 +151,7 @@ typedef struct {
      } create;
      struct {
          char join;
+         char clike;
      } select;
 } sql_parser_t;
 
@@ -201,7 +203,8 @@ void SQL_Statement_Destroy(sql_stmt_t* stmt);
 char* SQL_Statement_Error(int);
 char* SQL_Statement_Command(int);
 char* SQL_Statement_Op(int);
-int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2);
+int SQL_Statement_Like(const char* s1, int l1, const char* s2, int l2,
+		       int case_sensitive);
 int SQL_Statement_EvalWhere(sql_stmt_t* stmt);
 
 extern sql_parser_t ansiParser;
