@@ -12,7 +12,7 @@ package SQL::Parser;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '1.0';
+$VERSION = '1.002';
 
 
 #############################
@@ -29,40 +29,52 @@ sub new {
        $dialect = 'AnyData';
     }
     my $flags  = shift || {};
-    $flags->{dialect}      = $dialect;
-    $flags->{PrintError}   = 1 unless defined $flags->{PrintError};
+    $flags->{"dialect"}      = $dialect;
+    $flags->{"PrintError"}   = 1 unless defined $flags->{"PrintError"};
     my $self = bless_me($class,$flags);
-    $self->dialect( $self->{dialect} );
-    $self->set_feature_flags($self->{select},$self->{create});
+    $self->dialect( $self->{"dialect"} );
+    $self->set_feature_flags($self->{"select"},$self->{"create"});
     return bless $self,$class;
 }
 
 sub parse {
     my $self = shift;
     my $sql = shift;
-    $self->dialect( $self->{dialect} )  unless $self->{dialect_set};
+    $self->dialect( $self->{"dialect"} )  unless $self->{"dialect_set"};
     $sql =~ s/^\s+//;
     $sql =~ s/\s+$//;
-    $self->{struct} = {};
-    $self->{tmp} = {};
-    $self->{original_string} = $sql;
+    $self->{"struct"} = {};
+    $self->{"tmp"} = {};
+    $self->{"original_string"} = $sql;
+    # comment out lines 48,49,50,51
+    # insert these lines after line 51:
+    #    my $comment_re = $self->{"comment_re"} || qr/--.*(\n|$)/;
+    my $comment_re = $self->{"comment_re"} || '\/\*.*?\*\/';
+    $self->{"comment_re"} = $comment_re;
+    my $starts_with_comment;
+    if ($sql =~ /^\s*($comment_re)(.*)$/s) {
+       $self->{"comment"} = $1;
+       $sql = $2;
+       $starts_with_comment=1;
+    } 
     $sql = $self->clean_sql($sql);
     my($com) = $sql =~ /^\s*(\S+)\s+/s ;
     if (!$com) {
+        return 1 if $starts_with_comment;
         return $self->do_err("Incomplete statement!");
     }
     $com = uc $com;
-    if ($self->{opts}->{valid_commands}->{$com}) {
+    if ($self->{"opts"}->{"valid_commands"}->{$com}) {
         my $rv = $self->$com($sql);
-        delete $self->{struct}->{literals};
-        return $self->do_err("No table names found!")
-               unless $self->{struct}->{table_names};
+        delete $self->{"struct"}->{"literals"};
+#        return $self->do_err("No table names found!")
+#               unless $self->{"struct"}->{"table_names"};
         return $self->do_err("No command found!")
-               unless $self->{struct}->{command};
-        if ( $self->{struct}->{join}
-         and scalar keys %{$self->{struct}->{join}}==0
+               unless $self->{"struct"}->{"command"};
+        if ( $self->{"struct"}->{"join"}
+         and scalar keys %{$self->{"struct"}->{"join"}}==0
          ) {
-            delete $self->{struct}->{join};
+            delete $self->{"struct"}->{"join"};
 	}
         return $rv;
     } 
@@ -71,13 +83,13 @@ sub parse {
     }
 }
 
-sub structure { shift->{struct} }
+sub structure { shift->{"struct"} }
 
 sub feature {
     my($self,$opt_class,$opt_name,$opt_value) = @_;
     if (defined $opt_value) {
         if ( $opt_class eq 'select' ) {
-            $self->set_feature_flags( {join=>$opt_value} );
+            $self->set_feature_flags( {"join"=>$opt_value} );
         }
         elsif ( $opt_class eq 'create' ) {
             $self->set_feature_flags( undef, {$opt_name=>$opt_value} );
@@ -87,11 +99,11 @@ sub feature {
 	} 
     }
     else {
-        return $self->{opts}->{$opt_class}->{$opt_name};
+        return $self->{"opts"}->{$opt_class}->{$opt_name};
     }
 }
 
-sub errstr  { shift->{struct}->{errstr} }
+sub errstr  { shift->{"struct"}->{"errstr"} }
 
 sub list {
     my $self = shift;
@@ -102,9 +114,9 @@ sub list {
     $com = 'valid_data_types' if $com eq 'TYPES';
     $com = 'valid_options' if $com eq 'OPTIONS';
     $com = 'reserved_words' if $com eq 'RESERVED';
-    $self->dialect( $self->{dialect} ) unless $self->{dialect_set};
+    $self->dialect( $self->{"dialect"} ) unless $self->{"dialect_set"};
 
-    return sort keys %{ $self->{opts}->{$com} } unless $com eq 'DIALECTS';
+    return sort keys %{ $self->{"opts"}->{$com} } unless $com eq 'DIALECTS';
     my $dDir = "SQL/Dialects";
     my @dialects;
     for my $dir(@INC) {
@@ -121,8 +133,8 @@ sub list {
 
 sub dialect {
     my($self,$dialect) = @_;
-    return $self->{dialect} unless $dialect;
-    $self->{opts} = {};
+    return $self->{"dialect"} unless $dialect;
+    $self->{"opts"} = {};
     my $mod = "SQL/Dialects/$dialect.pm";
     undef $@;
     eval {
@@ -145,134 +157,10 @@ sub dialect {
         }
         my $newopt = uc $_;
         $newopt =~ s/\s+/ /g;
-        $self->{opts}->{$feature}->{$newopt} = 1;
+        $self->{"opts"}->{$feature}->{$newopt} = 1;
     }
-    $self->{dialect} = $dialect;
-    $self->{dialect_set}++;
-}
-
-######################################################
-# build() mostly written by Ilya Sterin, thanks Ilya!
-######################################################
-sub build {
-    my $self = shift;
-    my $stmt = shift || $self->{struct};
-    my $new_sql;
-
-    ### SELECT statement
-    if ($stmt->{command} eq 'SELECT') {
-        $new_sql = 'SELECT ';
-        if ( $stmt->{set_quantifier} ) {
-            $new_sql .= $stmt->{set_quantifier} . ' ';
-	}
-        if ( $stmt->{set_function} ) {
-            $new_sql .= $stmt->{set_function}->{name} . ' ('
-                     .  $stmt->{set_function}->{arg}  . ')';
-	}
-        else {
-            $new_sql .= join ( ', ', @{ $stmt->{column_names} } )
-	}
-        $new_sql .= ' FROM ' . join ( ', ', @{ $stmt->{table_names} } );
-        if ( $stmt->{where_clause} ) {
-            $new_sql .= rebuild_where($stmt);
-	}
-        if ( scalar $stmt->{sort_spec_list} ) {
-            my @ocols;
-            foreach ( 0..$#{ $stmt->{sort_spec_list} } ) {
-                my ($key, $value) = %{$stmt->{sort_spec_list}->[$_]};
-                my $newcol = $key;
-                $newcol .= " $value" if defined $value;
-                push @ocols, $newcol;
-            }
-            $new_sql .= ' ORDER BY ' . join(', ',@ocols);
-        }
-        if ( $stmt->{limit_clause} ) {
-            $new_sql .= ' LIMIT ';
-            $new_sql .= $stmt->{limit_clause}->{offset} . ', '
-                  if defined( $stmt->{limit_clause}->{offset} );
-            $new_sql .= $stmt->{limit_clause}->{limit};
-        }
-        return $new_sql;
-    }
-
-    ### CREATE statement
-    if ($stmt->{command} eq 'CREATE') {
-        return $new_sql =
-            'CREATE TABLE '
-          . join ( ', ', @{ $stmt->{table_names} } )
-          . ' ( '
-          . join (', ', map{ 
-              "$stmt->{column_names}->[$_] "
-            . $stmt->{column_defs}->{$stmt->{column_names}->[$_]}->{data_type}
-            } ( 0..$#{ $stmt->{column_names} } ) )
-          . ' )';
-
-    }
-
-    ### DELETE statement
-    if ( $stmt->{command} eq 'DELETE' ) {
-        $new_sql = 'DELETE FROM ' . join ( ', ', @{ $stmt->{table_names} });
-        if ( $stmt->{where_clause} ) {
-            $new_sql .= rebuild_where($stmt);
-	}
-        return $new_sql;
-    }
-
-    ### UPDATE statement
-    if ($stmt->{command} eq 'UPDATE') {
-        $new_sql = 'UPDATE '
-                 . join ( ', ', @{ $stmt->{table_names} })
-                 . ' SET '
-                 . join (', ', map{ my $y=$stmt->{values}->[$_];
-                                    my $x=$y->{value} || 'NULL';
-                                    $x = "'$x'" if $y->{type} eq 'string';
-                                    "$stmt->{column_names}->[$_] = $x"
-                                  } ( 0..$#{ $stmt->{column_names} } ) );
-        if ( $stmt->{where_clause} ) {
-            $new_sql .= rebuild_where($stmt);
-	}
-        return $new_sql;
-    }
-
-    ### INSERT statement
-    if ($stmt->{command} eq 'INSERT') {
-        $new_sql = 'INSERT INTO '
-                 . join (', ',  @{ $stmt->{table_names} } );
-        $new_sql .= ' ('.join (', ', @{ $stmt->{column_names} }).')'
-                 if ( $stmt->{column_names}->[0] ne '*' );
-        $new_sql .= ' VALUES ( '
-                 . join (', ', map{ my $x=$_->{value} || 'NULL';
-                                    $x = "'$x'" if $_->{type} eq 'string';
-                                    $x;
-                                  } @{ $stmt->{values} })
-                . ' )';
-        return $new_sql;
-    }
-
-    ### DROP statement
-    if ($stmt->{command} eq 'DROP')  {
-        return $new_sql = 'DROP TABLE '
-                        . join (', ',  @{ $stmt->{table_names} } );
-    }
-    return $self->do_err("Can't build from supplied structure!");
-}
-
-sub rebuild_where {
-    my $stmt = shift;
-    my $new_sql;
-    foreach (0..$#{$stmt->{where_clause}->{predicates}})  {
-        $new_sql .= " WHERE " if $_ == 0;
-        my $predicates = $stmt->{where_clause}->{predicates}->[$_];
-        my $combiners = $stmt->{where_clause}->{combiners}->[$_];
-        $new_sql .= "NOT " if $predicates->{neg};
-        my $val1 = $predicates->{arg1}->{value};
-        $val1 = "'$val1'" if $predicates->{arg1}->{type} eq 'string';
-        my $val2 = $predicates->{arg2}->{value} || 'NULL';
-        $val2 = "'$val2'" if $predicates->{arg2}->{type} eq 'string';
-        $new_sql .= "$val1 " . $predicates->{op} . " $val2";
-        $new_sql .= " $combiners " if $combiners;
-  }
-  return $new_sql;
+    $self->{"dialect"} = $dialect;
+    $self->{"dialect_set"}++;
 }
 
 ##################################################################
@@ -286,7 +174,7 @@ sub DROP {
     my $self = shift;
     my $stmt = shift;
     my $table_name;
-    $self->{struct}->{command}     = 'DROP';
+    $self->{"struct"}->{"command"}     = 'DROP';
     if ($stmt =~ /^\s*DROP\s+(\S+)\s+(.+)$/si ) {
        my $com2    = $1 || '';
        $table_name = $2;
@@ -299,7 +187,7 @@ sub DROP {
       $table_name =~ s/\s+$//;
       if ( $table_name =~ /(\S+) (RESTRICT|CASCADE)/i) {
           $table_name = $1;
-          $self->{struct}->{drop_behavior} = uc $2;
+          $self->{"struct"}->{"drop_behavior"} = uc $2;
       }
     }
     else {
@@ -307,8 +195,8 @@ sub DROP {
 
     }
     return undef unless $self->TABLE_NAME($table_name);
-    $self->{tmp}->{is_table_name}  = {$table_name => 1};
-    $self->{struct}->{table_names} = [$table_name];
+    $self->{"tmp"}->{"is_table_name"}  = {$table_name => 1};
+    $self->{"struct"}->{"table_names"} = [$table_name];
     return 1;
 }
 
@@ -317,16 +205,16 @@ sub DROP {
 ####################################################
 sub DELETE {
     my($self,$str) = @_;
-    $self->{struct}->{command}     = 'DELETE';
+    $self->{"struct"}->{"command"}     = 'DELETE';
     my($table_name,$where_clause) = $str =~
         /^DELETE FROM (\S+)(.*)$/i;
     return $self->do_err(
         'Incomplete DELETE statement!'
     ) if !$table_name;
     return undef unless $self->TABLE_NAME($table_name);
-    $self->{tmp}->{is_table_name}  = {$table_name => 1};
-    $self->{struct}->{table_names} = [$table_name];
-    $self->{struct}->{column_names} = ['*'];
+    $self->{"tmp"}->{"is_table_name"}  = {$table_name => 1};
+    $self->{"struct"}->{"table_names"} = [$table_name];
+    $self->{"struct"}->{"column_names"} = ['*'];
     $where_clause =~ s/^\s+//;
     $where_clause =~ s/\s+$//;
     if ($where_clause) {
@@ -349,7 +237,7 @@ sub DELETE {
 
 sub SELECT {
     my($self,$str) = @_;
-    $self->{struct}->{command} = 'SELECT';
+    $self->{"struct"}->{"command"} = 'SELECT';
     my($from_clause,$where_clause,$order_clause,$limit_clause);
     $str =~ s/^SELECT (.+)$/$1/i;
     if ( $str =~ s/^(.+) LIMIT (.+)$/$1/i ) { $limit_clause = $2; }
@@ -370,11 +258,14 @@ sub SELECT {
     if ($limit_clause) {
         return undef unless $self->LIMIT_CLAUSE($limit_clause);
     }
-    if ( ( $self->{struct}->{join}->{clause}
-           and $self->{struct}->{join}->{clause} eq 'ON'
+    if ( ( $self->{"struct"}->{"join"}->{"clause"}
+           and $self->{"struct"}->{"join"}->{"clause"} eq 'ON'
          )
-      or ( $self->{struct}->{multiple_tables} 
-            and !$self->{struct}->{join}
+      or ( $self->{"struct"}->{"multiple_tables"}
+###new
+            and !(scalar keys %{$self->{"struct"}->{"join"}})
+#            and !$self->{"struct"}->{"join"}
+###
        ) ) {
            return undef unless $self->IMPLICIT_JOIN();
     }
@@ -383,15 +274,19 @@ sub SELECT {
 
 sub IMPLICIT_JOIN {
     my $self = shift;
-    delete $self->{struct}->{multiple_tables};
-    $self->{struct}->{join}->{type}    = 'INNER';
-    $self->{struct}->{join}->{clause}  = 'IMPLICIT';
-    if (defined $self->{struct}->{keycols} ) {
+    delete $self->{"struct"}->{"multiple_tables"};
+    if ( !$self->{"struct"}->{"join"}->{"clause"}
+           or $self->{"struct"}->{"join"}->{"clause"} ne 'ON'
+    ) {
+        $self->{"struct"}->{"join"}->{"type"}    = 'INNER';
+        $self->{"struct"}->{"join"}->{"clause"}  = 'IMPLICIT';
+    }
+    if (defined $self->{"struct"}->{"keycols"} ) {
         my @keys;
-        my @keys2 = @keys = @{ $self->{struct}->{keycols} };
-        $self->{struct}->{join}->{table_order} = $self->order_joins(\@keys2);
-        @{$self->{struct}->{join}->{keycols}} = @keys;
-        delete $self->{struct}->{keycols};
+        my @keys2 = @keys = @{ $self->{"struct"}->{"keycols"} };
+        $self->{"struct"}->{"join"}->{"table_order"} = $self->order_joins(\@keys2);
+        @{$self->{"struct"}->{"join"}->{"keycols"}} = @keys;
+        delete $self->{"struct"}->{"keycols"};
     }
     else {
         return $self->do_err("No equijoin condition in WHERE or ON clause");
@@ -406,38 +301,38 @@ sub EXPLICIT_JOIN {
     my($tableA,$tableB,$keycols,$jtype,$natural);
     ($tableA,$remainder) = $remainder =~ /^(\S+) (.*)/;
         if ( $remainder =~ /^NATURAL (.+)/) {
-            $self->{struct}->{join}->{clause} = 'NATURAL';
+            $self->{"struct"}->{"join"}->{"clause"} = 'NATURAL';
             $natural++;
             $remainder = $1;
         }
         if ( $remainder =~ 
            /^(INNER|LEFT|RIGHT|FULL|UNION) JOIN (.+)/
         ) {
-          $jtype = $self->{struct}->{join}->{clause} = $1;
+          $jtype = $self->{"struct"}->{"join"}->{"clause"} = $1;
           $remainder = $2;
           $jtype = "$jtype OUTER" if $jtype !~ /INNER|UNION/;
       }
         if ( $remainder =~ 
            /^(LEFT|RIGHT|FULL) OUTER JOIN (.+)/
         ) {
-          $jtype = $self->{struct}->{join}->{clause} = $1 . " OUTER";
+          $jtype = $self->{"struct"}->{"join"}->{"clause"} = $1 . " OUTER";
           $remainder = $2;
       }
       if ( $remainder =~ /^JOIN (.+)/) {
           $jtype = 'INNER';
-          $self->{struct}->{join}->{clause} = 'DEFAULT INNER';
+          $self->{"struct"}->{"join"}->{"clause"} = 'DEFAULT INNER';
           $remainder = $1;
       }
-      if ( $self->{struct}->{join} ) {
+      if ( $self->{"struct"}->{"join"} ) {
           if ( $remainder && $remainder =~ /^(.+?) USING \(([^\)]+)\)(.*)/) {
-              $self->{struct}->{join}->{clause} = 'USING';
+              $self->{"struct"}->{"join"}->{"clause"} = 'USING';
               $tableB = $1;
               my $keycolstr = $2;
               $remainder = $3;
               @$keycols = split /,/,$keycolstr;
           }
           if ( $remainder && $remainder =~ /^(.+?) ON (.+)/) {
-              $self->{struct}->{join}->{clause} = 'ON';
+              $self->{"struct"}->{"join"}->{"clause"} = 'ON';
               $tableB = $1;
               my $keycolstr = $2;
               $remainder = $3;
@@ -445,16 +340,16 @@ sub EXPLICIT_JOIN {
                   return $self->do_err(qq~Can't use OR in an ON clause!~,1);
 	      }
               @$keycols = split / AND /i,$keycolstr;
-              $self->{tmp}->{is_table_name}->{$tableA} = 1;
-              $self->{tmp}->{is_table_name}->{$tableB} = 1;
+              $self->{"tmp"}->{"is_table_name"}->{"$tableA"} = 1;
+              $self->{"tmp"}->{"is_table_name"}->{"$tableB"} = 1;
               for (@$keycols) {
                   my($arg1,$arg2) = split / = /;
                   return undef unless $arg1 = $self->ROW_VALUE($arg1);
                   return undef unless $arg2 = $self->ROW_VALUE($arg2);
-                  if ( $arg1->{type}eq 'column' and $arg2->{type}eq 'column'){
-                      push @{ $self->{struct}->{keycols} }, $arg1->{value};
-                      push @{ $self->{struct}->{keycols} }, $arg2->{value};
-                      delete $self->{struct}->{where_clause};
+                  if ( $arg1->{"type"}eq 'column' and $arg2->{"type"}eq 'column'){
+                      push @{ $self->{"struct"}->{"keycols"} }, $arg1->{"value"};
+                      push @{ $self->{"struct"}->{"keycols"} }, $arg2->{"value"};
+                      delete $self->{"struct"}->{"where_clause"};
 	          }
               }
           }
@@ -472,8 +367,8 @@ sub EXPLICIT_JOIN {
            );
 	}
         return undef unless $self->TABLE_NAME_LIST("$tableA,$tableB");
-        $self->{struct}->{join}->{type}    = $jtype;
-        $self->{struct}->{join}->{keycols} = $keycols if $keycols;
+        $self->{"struct"}->{"join"}->{"type"}    = $jtype;
+        $self->{"struct"}->{"join"}->{"keycols"} = $keycols if $keycols;
         return 1;
     }
     return $self->do_err("Couldn't parse explicit JOIN!");
@@ -483,7 +378,7 @@ sub SELECT_CLAUSE {
     my($self,$str) = @_;
     return undef unless $str;
     if ($str =~ s/^(DISTINCT|ALL) (.+)$/$2/i) {
-        $self->{struct}->{set_quantifier} = uc $1;
+        $self->{"struct"}->{"set_quantifier"} = uc $1;
     }
     if ($str =~ /[()]/) {
         return undef unless $self->SET_FUNCTION_SPEC($str);
@@ -516,13 +411,13 @@ sub INSERT {
     return $self->do_err('No table name specified!') unless $table_name;
     return $self->do_err('Missing values list!') unless $val_str;
     return undef unless $self->TABLE_NAME($table_name);
-    $self->{struct}->{command} = 'INSERT';
-    $self->{struct}->{table_names} = [$table_name];
+    $self->{"struct"}->{"command"} = 'INSERT';
+    $self->{"struct"}->{"table_names"} = [$table_name];
     if ($col_str) {
         return undef unless $self->COLUMN_NAME_LIST($col_str);
     }
     else {
-          $self->{struct}->{column_names} = ['*'];
+          $self->{"struct"}->{"column_names"} = ['*'];
     }
     return undef unless $self->LITERAL_LIST($val_str);
     return 1;
@@ -536,15 +431,15 @@ sub INSERT {
 ###################################################################
 sub UPDATE {
     my($self,$str) = @_;
-    $self->{struct}->{command} = 'UPDATE';
+    $self->{"struct"}->{"command"} = 'UPDATE';
     my($table_name,$remainder) = $str =~
         /^UPDATE (.+?) SET (.+)$/i;
     return $self->do_err(
         'Incomplete UPDATE clause'
     ) if !$table_name or !$remainder;
     return undef unless $self->TABLE_NAME($table_name);
-    $self->{tmp}->{is_table_name}  = {$table_name => 1};
-    $self->{struct}->{table_names} = [$table_name];
+    $self->{"tmp"}->{"is_table_name"}  = {$table_name => 1};
+    $self->{"struct"}->{"table_names"} = [$table_name];
     my($set_clause,$where_clause) = $remainder =~
         /(.*?) WHERE (.*)$/i;
     $set_clause = $remainder if !$set_clause;
@@ -562,8 +457,21 @@ sub UPDATE {
 sub CREATE {
     my $self = shift;
     my $stmt = shift;
-    $self->{struct}->{command} = 'CREATE';
+    $self->{"struct"}->{"command"} = 'CREATE';
     my($table_name,$table_element_def);
+    if ($stmt =~ /^CREATE (LOCAL|GLOBAL) TEMPORARY TABLE(.*)$/si ) {
+        $self->{"struct"}->{"table_type"} = "$1 TEMPORARY";
+        $stmt = "CREATE TABLE$2";
+    }
+    if ($stmt =~ /^(.*) ON COMMIT (DELETE|PRESERVE) ROWS\s*$/si ) {
+        $stmt = $1;
+        $self->{"struct"}->{"commit_behaviour"} = $2;
+        return $self->do_err(
+           "Can't specify commit behaviour for permanent tables."
+        )
+           if !defined $self->{"struct"}->{"table_type"}
+              or $self->{"struct"}->{"table_type"} !~ /TEMPORARY/;
+    }
     if ($stmt =~ /^CREATE TABLE (\S+) \((.*)\)$/si ) {
        $table_name        = $1;
        $table_element_def = $2;
@@ -572,6 +480,7 @@ sub CREATE {
         return $self->do_err( "Can't find column definitions!" );
     }
     $table_element_def =~ s/\s+\(/(/g;
+    my $primary_defined;
     for my $col(split ',',$table_element_def) {
         my($name,$type,$constraints)=($col =~/\s*(\S+)\s+(\S+)\s*(.*)/);
         if (!$type) {
@@ -593,13 +502,13 @@ sub CREATE {
                            qq~Duplicate constraint: '$constr'!~
                        );
 		   }
-                   if ($cur_c eq 'PRIMARY_KEY' and scalar keys %has_c ) {
+                   if ($cur_c eq 'PRIMARY_KEY' and $primary_defined++ ) {
   		       return $self->do_err(
-                           qq~PRIMARY KEY must be only constraint!~
+                           qq~There can be only one PRIMARY KEY in a table!~
                         );
 		   }
                    $constr =~ s/_/ /g;
-                   push @{$self->{struct}->{column_defs}->{$name}->{constraints} }, $constr;
+                   push @{$self->{"struct"}->{"column_defs"}->{"$name"}->{"constraints"} }, $constr;
 
 	       }
                else {
@@ -613,15 +522,15 @@ sub CREATE {
             $type = $1;
             $length = $2;
 	}
-        if (!$self->{opts}->{valid_data_types}->{$type}) {
+        if (!$self->{"opts"}->{"valid_data_types"}->{"$type"}) {
             return $self->do_err("'$type' is not a recognized data type!");
 	}
-        $self->{struct}->{column_defs}->{$name}->{data_type} = $type;
-        $self->{struct}->{column_defs}->{$name}->{data_length} = $length;
-        push @{$self->{struct}->{column_names}},$name;
+        $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_type"} = $type;
+        $self->{"struct"}->{"column_defs"}->{"$name"}->{"data_length"} = $length;
+        push @{$self->{"struct"}->{"column_names"}},$name;
 
     } 
-    $self->{struct}->{table_names} = [$table_name];
+    $self->{"struct"}->{"table_names"} = [$table_name];
     return 1;
 }
 
@@ -649,7 +558,7 @@ sub SET_CLAUSE_LIST {
 sub SET_QUANTIFIER {
     my($self,$str) = @_;
     if ($str =~ /^(DISTINCT|ALL)\s+(.*)$/si) {
-        $self->{struct}->{set_quantifier} = uc $1;
+        $self->{"struct"}->{"set_quantifier"} = uc $1;
         $str = $2;
     }
     return $str;
@@ -659,7 +568,7 @@ sub SELECT_LIST {
     my $self = shift;
     my $col_str = shift;
     if ( $col_str =~ /^\s*\*\s*$/ ) {
-        $self->{struct}->{column_names} = ['*'];
+        $self->{"struct"}->{"column_names"} = ['*'];
         return 1;
     }
     my @col_list = split ',',$col_str;
@@ -670,14 +579,16 @@ sub SELECT_LIST {
     for my $col(@col_list) {
         $col = trim($col);
         if ($col =~ /^(\S+)\.\*$/) {
-            return undef unless $self->TABLE_NAME($1);
+            my $table = $1;
+            return undef unless $self->TABLE_NAME($table);
+            push @newcols, "$table.*";
         }
         else {
             return undef unless $newcol = $self->COLUMN_NAME($col);
             push @newcols, $newcol;
 	}
     }
-    $self->{struct}->{column_names} = \@newcols;
+    $self->{"struct"}->{"column_names"} = \@newcols;
     return 1;
 }
 
@@ -698,12 +609,12 @@ sub SET_FUNCTION_SPEC {
             my $ok = $self->COLUMN_NAME($set_function_arg)
                      if !$count_star;
             return undef if !$count_star and !$ok;
-            push @{ $self->{struct}->{'set_function'}}, {
+            push @{ $self->{"struct"}->{'set_function'}}, {
                 name     => $set_function_name,
                 arg      => $set_function_arg,
                 distinct => $distinct,
             };
-            push( @{ $self->{struct}->{column_names} }, $set_function_arg)
+            push( @{ $self->{"struct"}->{"column_names"} }, $set_function_arg)
                  if !$iscol{$set_function_arg}++
                 and ($set_function_arg ne '*');
         }
@@ -711,8 +622,9 @@ sub SET_FUNCTION_SPEC {
 	  return $self->do_err("Bad set function before FROM clause.");
 	}
     }
-    if (not scalar @{ $self->{struct}->{column_names} } ) {
-         $self->{struct}->{column_names} = ['*'];
+    my $cname = $self->{"struct"}->{"column_names"};
+    if ( !$cname or not scalar @$cname ) {
+         $self->{"struct"}->{"column_names"} = ['*'];
     } 
     return 1;
 }
@@ -730,7 +642,7 @@ sub LIMIT_CLAUSE {
         $limit = $offset;
         undef $offset;
     }
-    $self->{struct}->{limit_clause} = {
+    $self->{"struct"}->{"limit_clause"} = {
         limit  => $limit,
         offset => $offset,
      };
@@ -747,7 +659,7 @@ sub is_number {
 sub SORT_SPEC_LIST {
         my($self,$order_clause) = @_;
         return 1 if !$order_clause;
-        my %is_table_name = %{$self->{tmp}->{is_table_name}};
+        my %is_table_name = %{$self->{"tmp"}->{"is_table_name"}};
         my @ocols;
         my @order_columns = split ',',$order_clause;
         for my $col(@order_columns) {
@@ -776,7 +688,7 @@ sub SORT_SPEC_LIST {
 	    }
             push @ocols, {$newcol => $newarg};
 	}
-        $self->{struct}->{sort_spec_list} = \@ocols;
+        $self->{"struct"}->{"sort_spec_list"} = \@ocols;
         return 1;
 }
 
@@ -799,7 +711,7 @@ sub SEARCH_CONDITION {
         ? $self->parens_search($str,[])
         : $self->non_parens_search($str,[]);
     return $self->do_err("Couldn't find predicate!") unless $pred;
-    $self->{struct}->{where_clause} = $pred;
+    $self->{"struct"}->{"where_clause"} = $pred;
     return 1;
 }
 
@@ -1015,7 +927,7 @@ sub LITERAL_LIST {
         ) unless $val;
         push @values, $val;
     }
-    $self->{struct}->{values} = \@values;
+    $self->{"struct"}->{"values"} = \@values;
     return 1;
 }
 
@@ -1027,6 +939,7 @@ sub LITERAL {
     my $self = shift;
     my $str  = shift;
     return 'null' if $str =~ /^NULL$/i;    # NULL
+    return 'empty_string' if $str =~ /^~E~$/i;    # NULL
     return 'placeholder' if $str eq '?';   # placeholder question mark
     return 'string' if $str =~ /^'.*'$/s;  # quoted string
     return 'number' if $str =~             # number
@@ -1039,7 +952,7 @@ sub LITERAL {
 sub PREDICATE {
     my $self = shift;
     my $str  = shift;
-    my @allops = keys %{ $self->{opts}->{valid_comparison_operators} };
+    my @allops = keys %{ $self->{"opts"}->{"valid_comparison_operators"} };
     my @notops;
     for (@allops) { push (@notops, $_) if /NOT/i };
     my $ops = join '|', @notops;
@@ -1080,12 +993,12 @@ sub PREDICATE {
     $negated = 1 if %not and scalar keys %not == 1;
     return undef unless $arg1 = $self->ROW_VALUE($arg1);
     return undef unless $arg2 = $self->ROW_VALUE($arg2);
-    if ( $arg1->{type}eq 'column'
-     and $arg2->{type}eq 'column'
+    if ( $arg1->{"type"}eq 'column'
+     and $arg2->{"type"}eq 'column'
      and $op eq '='
        ) {
-        push @{ $self->{struct}->{keycols} }, $arg1->{value};
-        push @{ $self->{struct}->{keycols} }, $arg2->{value};
+        push @{ $self->{"struct"}->{"keycols"} }, $arg1->{"value"};
+        push @{ $self->{"struct"}->{"keycols"} }, $arg2->{"value"};
     }
     return {
         neg  => $negated,
@@ -1134,7 +1047,7 @@ sub ROW_VALUE {
         my @newvalues;
         for (@vals) {
             my $val = $self->ROW_VALUE($_);
-            if ($val && $val->{type} !~ /number|column|placeholder/) {
+            if ($val && $val->{"type"} !~ /number|column|placeholder/) {
                  return $self->do_err(qq[
                      String '$val' not allowed in Numeric expression!
                  ]);
@@ -1162,21 +1075,21 @@ sub ROW_VALUE {
             $length = $self->ROW_VALUE($length);
 	}
         $start = $self->ROW_VALUE($start);
-        $str =~ s/\?(\d+)\?/$self->{struct}->{literals}->[$1]/g;
+        $str =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g;
         return $self->do_err(
                 "Can't use a string as a SUBSTRING position: '$str'!")
-               if $start->{type} eq 'string'
-               or ($start->{length} and $start->{length}->{type} eq 'string');
+               if $start->{"type"} eq 'string'
+               or ($start->{"length"} and $start->{"length"}->{"type"} eq 'string');
         return undef unless $value;
         return $self->do_err(
                 "Can't use a number in SUBSTRING: '$str'!")
-               if $value->{type} eq 'number';
+               if $value->{"type"} eq 'number';
         return {
-            type   => 'function',
-            name   => $name,
-            value  => $value,
-            start  => $start,
-            length => $length,
+            "type"   => 'function',
+            "name"   => $name,
+            "value"  => $value,
+            "start"  => $start,
+            "length" => $length,
         };
     }
 
@@ -1187,10 +1100,10 @@ sub ROW_VALUE {
         my $name  = uc $1;
         my $value = $self->ROW_VALUE($2);
         return undef unless $value;
-        $str =~ s/\?(\d+)\?/$self->{struct}->{literals}->[$1]/g;
+        $str =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g;
         return $self->do_err(
                 "Can't use a number in UPPER/LOWER: '$str'!")
-               if $value->{type} eq 'number';
+               if $value->{"type"} eq 'number';
         return {
             type  => 'function',
             name  => $name,
@@ -1216,13 +1129,13 @@ sub ROW_VALUE {
 	        $trim_char = trim($front);
 	    }
 	}
-        $trim_char =~ s/\?(\d+)\?/$self->{struct}->{literals}->[$1]/g if $trim_char;
+        $trim_char =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g if $trim_char;
         $value = $self->ROW_VALUE($value);
         return undef unless $value;
-        $str =~ s/\?(\d+)\?/$self->{struct}->{literals}->[$1]/g;
+        $str =~ s/\?(\d+)\?/$self->{"struct"}->{"literals"}->[$1]/g;
         return $self->do_err(
                 "Can't use a number in TRIM: '$str'!")
-               if $value->{type} eq 'number';
+               if $value->{"type"} eq 'number';
         return {
             type      => 'function',
             name      => $name,
@@ -1242,7 +1155,7 @@ sub ROW_VALUE {
             return undef unless $newval;
             return $self->do_err(
                 "Can't use a number in string concatenation: '$str'!")
-                if $newval->{type} eq 'number';
+                if $newval->{"type"} eq 'number';
             push @newvals,$newval;
 	}
         return {
@@ -1256,6 +1169,10 @@ sub ROW_VALUE {
     #
     if ( $type = $self->LITERAL($str) ) {
         undef $str if $type eq 'null';
+        if ($type eq 'empty_string') {
+           $str = '';
+           $type = 'string';
+	} 
         return { type => $type, value => $str };
     }
 
@@ -1263,19 +1180,19 @@ sub ROW_VALUE {
     #
     if ($str =~ /\?(\d+)\?/) {
         return { type  =>'string',
-                 value  => $self->{struct}->{literals}->[$1] };
+                 value  => $self->{"struct"}->{"literals"}->[$1] };
     }
     # COLUMN NAME
     #
     return undef unless $str = $self->COLUMN_NAME($str);
-    if ( $str =~ /^(.*)\./ && !$self->{tmp}->{is_table_name}->{$1}) {
+    if ( $str =~ /^(.*)\./ && !$self->{"tmp"}->{"is_table_name"}->{$1}) {
         return $self->do_err(
             "Table '$1' in WHERE clause not in FROM clause!"
         );
     }
-    push @{ $self->{struct}->{where_clause}->{cols}},$str
-       unless $self->{tmp}->{where_cols}->{$str};
-    $self->{tmp}->{where_cols}->{$str}++;
+    push @{ $self->{"struct"}->{"where_clause"}->{"cols"}},$str
+       unless $self->{"tmp"}->{"where_cols"}->{"$str"};
+    $self->{"tmp"}->{"where_cols"}->{"$str"}++;
     return { type => 'column', value => $str };
 }
 
@@ -1287,15 +1204,15 @@ sub COLUMN_NAME {
     my $str = shift;
     my($table_name,$col_name);
     if ( $str =~ /^\s*(\S+)\.(\S+)$/s ) {
-      if (!$self->{opts}->{valid_options}->{SELECT_MULTIPLE_TABLES}) {
+      if (!$self->{"opts"}->{"valid_options"}->{"SELECT_MULTIPLE_TABLES"}) {
           return $self->do_err('Dialect does not support multiple tables!');
       }
       $table_name = $1;
       $col_name   = $2;
-      my $alias = $self->{struct}->{table_alias}->{$table_name};
+      my $alias = $self->{"struct"}->{"table_alias"}->{"$table_name"};
       $table_name = $alias if $alias;
       return undef unless $self->TABLE_NAME($table_name);
-      if (!$self->{tmp}->{is_table_name}->{$table_name}) {
+      if (!$self->{"tmp"}->{"is_table_name"}->{"$table_name"}) {
           $self->do_err(
                 "Table '$table_name' referenced but not found in FROM list!"
           );
@@ -1327,7 +1244,7 @@ sub COLUMN_NAME_LIST {
         return undef if !($newcol = $self->COLUMN_NAME(trim($col)));
         push @newcols, $newcol;
     }
-    $self->{struct}->{column_names} = \@newcols;
+    $self->{"struct"}->{"column_names"} = \@newcols;
     return 1;
 }
 
@@ -1342,7 +1259,7 @@ sub TABLE_NAME_LIST {
     my @tables;
     my @table_names = split ',', $table_name_str;
     if ( scalar @table_names > 1
-        and !$self->{opts}->{valid_options}->{'SELECT_MULTIPLE_TABLES'}
+        and !$self->{"opts"}->{"valid_options"}->{'SELECT_MULTIPLE_TABLES'}
     ) {
         return $self->do_err('Dialect does not support multiple tables!');
     }
@@ -1367,10 +1284,10 @@ sub TABLE_NAME_LIST {
 	}
     }
     my %is_table_name = map { $_ => 1 } @tables,keys %aliases;
-    $self->{tmp}->{is_table_name}  = \%is_table_name;
-    $self->{struct}->{table_names} = \@tables;
-    $self->{struct}->{table_alias} = \%aliases;
-    $self->{struct}->{multiple_tables} = 1 if @tables > 1;
+    $self->{"tmp"}->{"is_table_name"}  = \%is_table_name;
+    $self->{"struct"}->{"table_names"} = \@tables;
+    $self->{"struct"}->{"table_alias"} = \%aliases;
+    $self->{"struct"}->{"multiple_tables"} = 1 if @tables > 1;
     return 1;
 }
 
@@ -1413,7 +1330,7 @@ sub IDENTIFIER {
         $err .= "contains more than 128 characters!";
         return $self->do_err( $err );
     }
-    if ( $self->{opts}->{reserved_words}->{$id} ) {   # BAD RESERVED WORDS
+    if ( $self->{"opts"}->{"reserved_words"}->{"$id"} ) {   # BAD RESERVED WORDS
         $err .= "is a SQL reserved word!";
         return $self->do_err( $err );
     }
@@ -1426,6 +1343,11 @@ sub IDENTIFIER {
 sub order_joins {
     my $self = shift;
     my $links = shift;
+    for my $link(@$links) {
+      if ($link !~ /\./) {
+          return [];
+      }
+    }
     @$links = map { s/^(.+)\..*$/$1/; $1; } @$links;
     my @all_tables;
     my %relations;
@@ -1474,17 +1396,17 @@ sub bless_me {
 sub set_feature_flags {
     my($self,$select,$create) = @_;
     if (defined $select) {
-        delete $self->{select};
-        $self->{opts}->{valid_options}->{SELECT_MULTIPLE_TABLES} =
-            $self->{opts}->{select}->{join} =  $select->{join};
+        delete $self->{"select"};
+        $self->{"opts"}->{"valid_options"}->{"SELECT_MULTIPLE_TABLES"} =
+            $self->{"opts"}->{"select"}->{"join"} =  $select->{"join"};
     }
     if (defined $create) {
-        delete $self->{create};
+        delete $self->{"create"};
         for my $key(keys %$create) {
             my $type = $key;
             $type =~ s/type_(.*)/\U$1/;
-            $self->{opts}->{valid_data_types}->{$type} =
-                $self->{opts}->{create}->{$key} = $create->{$key};
+            $self->{"opts"}->{"valid_data_types"}->{"$type"} =
+                $self->{"opts"}->{"create"}->{"$key"} = $create->{"$key"};
 	}
     }
 }
@@ -1496,18 +1418,39 @@ sub clean_sql {
     my $i=-1;
     my $e = '\\';
     $e = quotemeta($e);
+###new
+# CAN'T HANDLE BLOBS!!!
+#    $sql = quotemeta($sql);
+ #   print "[$sql]\n";
+#    if ($sql =~ s/^(.*,\s*)''(\s*[,\)].*)$/${1}NULL$2/g ) {
+#    }
+#    $sql =~ s/^([^\\']+?)''(.*)$/${1} NULL $2/g;
+     $sql =~ s/([^\\]+?)''/$1 ~E~ /g;
+ #       print "$sql\n";
+###newend
     $sql =~ s~'(([^'$e]|$e.)+)'~push(@$fields,$1);$i++;"?$i?"~ge;
-    if ($sql =~ /'/) {
+###new
+#    if ( $sql =~ /'/) {
+    if ( $sql =~ tr/[^\\]'// % 2 == 1 ) {
+###endnew
         $sql =~ s/^.*\?(.+)$/$1/;
         die "Mismatched single quote before: '$sql\n";
     }
     if ($sql =~ /\?\?(\d)\?/) {
         $sql = $fields->[$1];
-        die "Mismatched single quote before: '$sql\n";
+        die "Mismatched single quote: '$sql\n";
     }
     @$fields = map { s/$e'/'/g; s/^'(.*)'$/$1/; $_} @$fields;
 #    $sql =~ s~'(([^'\\]|\\.)+)'~push(@$fields,$1);$i++;"?$i?"~ge;
 #    @$fields = map { s/\\'/'/g; s/^'(.*)'$/$1/; $_} @$fields;
+#print "$sql [@$fields]\n";# if $sql =~ /SELECT/;
+
+## before line 1511
+    my $comment_re = $self->{"comment_re"};
+    if ( $sql =~ s/($comment_re)//gs) {
+       $self->{"comment"} = $1;
+    }
+
     $sql =~ s/\n/ /g;
     $sql =~ s/\s+/ /g;
     $sql =~ s/(\S)\(/$1 (/g; # ensure whitespace before (
@@ -1528,7 +1471,7 @@ sub clean_sql {
     $sql =~ s/,\s*/,/g;
     $sql =~ s/^\s+//;
     $sql =~ s/\s+$//;
-    $self->{struct}->{literals} = $fields;
+    $self->{"struct"}->{"literals"} = $fields;
     return $sql;
 }
 
@@ -1549,9 +1492,10 @@ sub do_err {
 #                    : "SQL ERROR: $err in $c[3]";
     $err = $errtype ? "DIALECT ERROR: $err"
                     : "SQL ERROR: $err";
-    $self->{struct}->{errstr} = $err;
-    warn $err if $self->{PrintError};
-    die if $self->{RaiseError};
+    $self->{"struct"}->{"errstr"} = $err;
+    #$self->{"errstr"} = $err;
+    warn $err if $self->{"PrintError"};
+    die if $self->{"RaiseError"};
     return undef;
 }
 
@@ -1588,61 +1532,72 @@ __END__
 
 =head1 DESCRIPTION
 
- SQL::Parser is a parser, builder, and sytax validator for a small
- but useful subset of SQL (Structured Query Language).  It accepts SQL
- strings and returns either a detailed error message if the syntax is
- invalid or a data structure containing the results of the parse if
- the syntax is valid.  It will soon also work in reverse to build a SQL
- string from a supplied data structure.
+ SQL::Parser is a parser, builder, and sytax validator for a
+ small but useful subset of SQL (Structured Query Language).  It
+ accepts SQL strings and returns either a detailed error message
+ if the syntax is invalid or a data structure containing the
+ results of the parse if the syntax is valid.  It will soon also
+ work in reverse to build a SQL string from a supplied data
+ structure.
 
- The module can be used in batch mode to validate a series of statements,
- or as middle-ware for DBI drivers or other related projects.  When combined
- with SQL::Statement version 0.2 or greater, the module can be used to
- actually perform the SQL commands on a variety of file formats using 
- DBD::AnyData, or DBD::CSV, or DBD::Excel.
+ The module can be used in batch mode to validate a series of
+ statements, or as middle-ware for DBI drivers or other related
+ projects.  When combined with SQL::Statement version 0.2 or
+ greater, the module can be used to actually perform the SQL
+ commands on a variety of file formats using DBD::AnyData, or
+ DBD::CSV, or DBD::Excel.
 
- The module makes use of a variety of configuration files located in
- the SQL/Dialects directory, each of which is essentially a simple text file
- listing things like supported data types, reserved words, and other
- features specific to a given dialect of SQL.  These features can also
- be turned on or off during program execution.
+ The module makes use of a variety of configuration files
+ located in the SQL/Dialects directory, each of which is
+ essentially a simple text file listing things like supported
+ data types, reserved words, and other features specific to a
+ given dialect of SQL.  These features can also be turned on or
+ off during program execution.
 
 =head1 SUPPORTED SQL SYNTAX
 
-This module is meant primarly as a base class for DBD drivers and as such concentrates on a small but useful subset of SQL 92.  It does *not* in any way pretend to be a complete SQL 92 parser.  The module will continue to add new supported syntax, currently, this is what is supported:
+This module is meant primarly as a base class for DBD drivers
+and as such concentrates on a small but useful subset of SQL 92.
+It does *not* in any way pretend to be a complete SQL 92 parser.
+The module will continue to add new supported syntax, currently,
+this is what is supported:
 
 =head2 CREATE TABLE
 
- CREATE TABLE $table
-     (
-       $col_1 $col_type1 $col_constraints1, 
-       ...,
-       $col_N $col_typeN $col_constraintsN, 
-     )
+ CREATE [ {LOCAL|GLOBAL} TEMPORARY ] TABLE $table
+        (
+           $col_1 $col_type1 $col_constraints1, 
+           ...,
+           $col_N $col_typeN $col_constraintsN, 
+        )
+        [ ON COMMIT {DELETE|PRESERVE} ROWS ]
 
-     * col_type must be a valid data type as defined in the "valid_data_types"
-       section of the dialect file for the current dialect
+     * col_type must be a valid data type as defined in the
+       "valid_data_types" section of the dialect file for the
+       current dialect
 
-     * col_constriaints may be "PRIMARY KEY" or one or both of "UNIQUE" 
-       and/or "NOT NULL"
+     * col_constriaints may be "PRIMARY KEY" or one or both of
+       "UNIQUE" and/or "NOT NULL"
 
-     * IMPORTANT NOTE: 
-       data types and column constraints are checked for syntax violations
-       but are currently otherwise *IGNORED* -- they are recognized by the
-       parser, but not by the execution engine
+     * IMPORTANT NOTE: temporary tables, data types and column
+       constraints are checked for syntax violations but are
+       currently otherwise *IGNORED* -- they are recognized by
+       the parser, but not by the execution engine
 
-     * The following valid ANSI SQL92 options are not currently supported:
-       temporary tables, on-commit clauses, table constraints, named 
-       constraints, check constriants, reference constraints, constraint
-       attributes, collations,  default clauses, domain names as data types
+     * The following valid ANSI SQL92 options are not currently
+       supported: table constraints, named constraints, check
+       constriants, reference constraints, constraint
+       attributes, collations, default clauses, domain names as
+       data types
 
 =head2 DROP TABLE
 
  DROP TABLE $table [ RESTRICT | CASCADE ]
 
-     * IMPORTANT NOTE: drop behavior (cascade or restrict) is checked for
-       valid syntax but is otherwise *IGNORED* -- it is recognized by the
-       parser, but not by the execution engine
+     * IMPORTANT NOTE: drop behavior (cascade or restrict) is
+       checked for valid syntax but is otherwise *IGNORED* -- it
+       is recognized by the parser, but not by the execution
+       engine
 
 =head2 INSERT INTO
 
@@ -1722,9 +1677,10 @@ This module is meant primarly as a base class for DBD drivers and as such concen
 
 =head2 STRING FUNCTIONS & MATH EXPRESSIONS
 
-  String functions and math expressions are supported in WHERE clauses,
-  in the VALUES part of an INSERT and UPDATE statements.  They are not
-  currently supported in the SELECT statement.  For example:
+  String functions and math expressions are supported in WHERE
+  clauses, in the VALUES part of an INSERT and UPDATE
+  statements.  They are not currently supported in the SELECT
+  statement.  For example:
 
     SELECT * FROM foo WHERE UPPER(bar) = 'baz'   # SUPPORTED
 
@@ -1734,7 +1690,8 @@ This module is meant primarly as a base class for DBD drivers and as such concen
 
 =item  TRIM ( [ [LEADING|TRAILING|BOTH] ['trim_char'] FROM ] string )
 
-Removes all occurrences of <trim_char> from the front, back, or both sides of a string.
+Removes all occurrences of <trim_char> from the front, back, or
+both sides of a string.
 
  BOTH is the default if neither LEADING nor TRAILING is specified.
 
@@ -1753,7 +1710,9 @@ Removes all occurrences of <trim_char> from the front, back, or both sides of a 
 
 =item  SUBSTRING( string FROM start_pos [FOR length] )
 
-Returns the substring starting at start_pos and extending for "length" character or until the end of the string, if no "length" is supplied.  Examples:
+Returns the substring starting at start_pos and extending for
+"length" character or until the end of the string, if no
+"length" is supplied.  Examples:
 
   SUBSTRING( 'foobar' FROM 4 )       # returns "bar"
 
@@ -1773,30 +1732,49 @@ These return the upper-case and lower-case variants of the string:
 
 =head2 new()
 
-The new() method creates a SQL::Parser object which can then be used to parse, validate, or build SQL strings.  It takes one required parameter -- the name of the SQL dialect that will define the rules for the parser.  A second optional parameter is a reference to a hash which can contain additional attributes of the parser.
+The new() method creates a SQL::Parser object which can then be
+used to parse, validate, or build SQL strings.  It takes one
+required parameter -- the name of the SQL dialect that will
+define the rules for the parser.  A second optional parameter is
+a reference to a hash which can contain additional attributes of
+the parser.
 
  use SQL::Parser;
  my $parser = SQL::Parser->new( $dialect_name, \%attrs );
 
-The dialect_name parameter is a string containing any valid dialect such as 'ANSI', 'AnyData', or 'CSV'.  See the section on the dialect() method below for details.
+The dialect_name parameter is a string containing any valid
+dialect such as 'ANSI', 'AnyData', or 'CSV'.  See the section on
+the dialect() method below for details.
 
-The attribute parameter is a reference to a hash that can contain error settings for the PrintError and RaiseError attributes.  See the section below on the parse() method for details.
+The attribute parameter is a reference to a hash that can
+contain error settings for the PrintError and RaiseError
+attributes.  See the section below on the parse() method for
+details.
 
 An example:
 
   use SQL::Parser;
   my $parser = SQL::Parser->new('AnyData', {RaiseError=>1} );
 
-  This creates a new parser that uses the grammar rules contained in the
-  .../SQL/Dialects/AnyData.pm file and which sets the RaiseError attribute
-  to true.
+  This creates a new parser that uses the grammar rules
+  contained in the .../SQL/Dialects/AnyData.pm file and which
+  sets the RaiseError attribute to true.
 
-For those needing backwards compatibility with SQL::Statement version 0.1x and lower, the attribute hash may also contain feature settings.  See the section  "FURTHER DETAILS - Backwards Compatibility" below for details.
+For those needing backwards compatibility with SQL::Statement
+version 0.1x and lower, the attribute hash may also contain
+feature settings.  See the section "FURTHER DETAILS - Backwards
+Compatibility" below for details.
 
 
 =head2 parse()
 
-Once a SQL::Parser object has been created with the new() method, the parse() method can be used to parse any number of SQL strings.  It takes a single required parameter -- a string containing a SQL command.  The SQL string may optionally be terminated by a semicolon.  The parse() method returns a true value if the parse is successful and a false value if the parse finds SQL syntax errors.
+Once a SQL::Parser object has been created with the new()
+method, the parse() method can be used to parse any number of
+SQL strings.  It takes a single required parameter -- a string
+containing a SQL command.  The SQL string may optionally be
+terminated by a semicolon.  The parse() method returns a true
+value if the parse is successful and a false value if the parse
+finds SQL syntax errors.
 
 Examples:
 
@@ -1815,34 +1793,68 @@ Examples:
 
   4) my $success = $parser->parse('SELECT * FRoOM foo ');
 
-In examples #1,#2, and #3, the value of $success will be true because the strings passed to the parse() method are valid SQL strings.
+In examples #1,#2, and #3, the value of $success will be true
+because the strings passed to the parse() method are valid SQL
+strings.
 
-In example #4, however, the value of $success will be false because the string contains a SQL syntax error ('FRoOM' instead of 'FROM').
+In example #4, however, the value of $success will be false
+because the string contains a SQL syntax error ('FRoOM' instead
+of 'FROM').
 
-In addition to checking the return value of parse() with a variable like $success, you may use the PrintError and RaiseError attributes as you would in a DBI script:
+In addition to checking the return value of parse() with a
+variable like $success, you may use the PrintError and
+RaiseError attributes as you would in a DBI script:
 
  * If PrintError is true, then SQL syntax errors will be sent as
-   warnings to STDERR (i.e. to the screen or to a file if STDERR has
-   been redirected).  This is set to true by default which means that
-   unless you specifically turn it off, all errors will be reported.
+   warnings to STDERR (i.e. to the screen or to a file if STDERR
+   has been redirected).  This is set to true by default which
+   means that unless you specifically turn it off, all errors
+   will be reported.
 
- * If RaiseError is true, then SQL syntax errors will cause the script
-   to die, (i.e. the script will terminate unless wrapped in an eval).
-   This is set to false by default which means that unless you
-   specifically turn it on, scripts will continue to operate even if
-   there are SQL syntax errors.
+ * If RaiseError is true, then SQL syntax errors will cause the
+   script to die, (i.e. the script will terminate unless wrapped
+   in an eval).  This is set to false by default which means
+   that unless you specifically turn it on, scripts will
+   continue to operate even if there are SQL syntax errors.
 
-Basically, you should leave PrintError on or else you will not be warned when an error occurs.  If you are simply validating a series of strings, you will want to leave RaiseError off so that the script can check all strings regardless of whether some of them contain SQL errors.  However, if you are going to try to execute the SQL or need to depend that it is correct, you should set RaiseError on so that the program will only continue to operate if all SQL strings use correct syntax.
+Basically, you should leave PrintError on or else you will not
+be warned when an error occurs.  If you are simply validating a
+series of strings, you will want to leave RaiseError off so that
+the script can check all strings regardless of whether some of
+them contain SQL errors.  However, if you are going to try to
+execute the SQL or need to depend that it is correct, you should
+set RaiseError on so that the program will only continue to
+operate if all SQL strings use correct syntax.
 
-IMPORTANT NOTE #1: The parse() method only checks syntax, it does NOT verify if the objects listed actually exist.  For example, given the string "SELECT model FROM cars", the parse() method will report that the string contains valid SQL but that will not tell you whether there actually is a table called "cars" or whether that table contains a column called 'model'.  Those kinds of verifications can be performed by the SQL::Statement module, not by SQL::Parser by itself.
+IMPORTANT NOTE #1: The parse() method only checks syntax, it
+does NOT verify if the objects listed actually exist.  For
+example, given the string "SELECT model FROM cars", the parse()
+method will report that the string contains valid SQL but that
+will not tell you whether there actually is a table called
+"cars" or whether that table contains a column called 'model'.
+Those kinds of verifications can be performed by the
+SQL::Statement module, not by SQL::Parser by itself.
 
-IMPORTANT NOTE #2: The parse() method uses rules as defined by the selected dialect configuration file and the feature() method.  This means that a statement that is valid in one dialect may not be valid in another.  For example the 'CSV' and 'AnyData' dialects define 'BLOB' as a valid data type but the 'ANSI' dialect does not.  Therefore the statement 'CREATE TABLE foo (picture BLOB)' would be valid in the first two dialects but would produce a syntax error in the 'ANSI' dialect.
+IMPORTANT NOTE #2: The parse() method uses rules as defined by
+the selected dialect configuration file and the feature()
+method.  This means that a statement that is valid in one
+dialect may not be valid in another.  For example the 'CSV' and
+'AnyData' dialects define 'BLOB' as a valid data type but the
+'ANSI' dialect does not.  Therefore the statement 'CREATE TABLE
+foo (picture BLOB)' would be valid in the first two dialects but
+would produce a syntax error in the 'ANSI' dialect.
 
 =head2 structure()
 
-After a SQL::Parser object has been created and the parse() method used to parse a SQL string, the structure() method returns the data structure of that string.  This data structure may be passed on to other modules (e.g. SQL::Statement) or it may be printed out using, for example, the Data::Dumper module.
+After a SQL::Parser object has been created and the parse()
+method used to parse a SQL string, the structure() method
+returns the data structure of that string.  This data structure
+may be passed on to other modules (e.g. SQL::Statement) or it
+may be printed out using, for example, the Data::Dumper module.
 
-The data structure contains all of the information in the SQL string as parsed into its various components.  To take a simple example: 
+The data structure contains all of the information in the SQL
+string as parsed into its various components.  To take a simple
+example:
 
  $parser->parse('SELECT make,model FROM cars');
  use Data::Dumper;
@@ -1861,11 +1873,12 @@ Would produce:
                            ]
         };
 
-Please see the section "FURTHER DETAILS -- Parse structures" below for further examples.
+Please see the section "FURTHER DETAILS -- Parse structures"
+below for further examples.
 
 =head2 build()
 
-This method is in progress and should be available in the next release.
+This method is in progress and should be available soon.
 
 =head2 dialect()
 
@@ -1877,21 +1890,24 @@ This method is in progress and should be available in the next release.
    $parser->dialect('AnyData');  # loads the AnyData config file
    print $parser->dialect;       # prints 'AnyData'
 
- The $dialect_name parameter may be the name of any dialect configuration
- file on your system.  Use the $parser->list('dialects') method to see
- a list of available dialects.  At a minimum it will include "ANSI", "CSV",
- and "AnyData".  For backwards compatiblity 'Ansi' is accepted as a synonym
- for 'ANSI', otherwise the names are case sensitive.
+ The $dialect_name parameter may be the name of any dialect
+ configuration file on your system.  Use the
+ $parser->list('dialects') method to see a list of available
+ dialects.  At a minimum it will include "ANSI", "CSV", and
+ "AnyData".  For backwards compatiblity 'Ansi' is accepted as a
+ synonym for 'ANSI', otherwise the names are case sensitive.
 
- Loading a new dialect configuration file erases all current parser features
- and resets them to those defined in the configuration file.
+ Loading a new dialect configuration file erases all current
+ parser features and resets them to those defined in the
+ configuration file.
 
- See the section above on "Dialects" for details of these configuration files.
+ See the section above on "Dialects" for details of these
+ configuration files.
 
 =head2 feature()
 
-Features define the rules to be used by a specific parser instance.
-They are divided into the following classes:
+Features define the rules to be used by a specific parser
+instance.  They are divided into the following classes:
 
     * valid_commands
     * valid_options
@@ -1899,15 +1915,15 @@ They are divided into the following classes:
     * valid_data_types
     * reserved_words
 
-Within each class a feature name is either enabled or disabled. For
-example, under "valid_data_types" the name "BLOB" may be either
-disabled or enabled.  If it is not eneabled (either by being
-specifically disabled, or simply by not being specified at all) then
-any SQL string using "BLOB" as a data type will throw a syntax error
-"Invalid data type: 'BLOB'".
+Within each class a feature name is either enabled or
+disabled. For example, under "valid_data_types" the name "BLOB"
+may be either disabled or enabled.  If it is not eneabled
+(either by being specifically disabled, or simply by not being
+specified at all) then any SQL string using "BLOB" as a data
+type will throw a syntax error "Invalid data type: 'BLOB'".
 
-The feature() method allows you to enable, disable, or check the status
-of any feature.
+The feature() method allows you to enable, disable, or check the
+status of any feature.
 
  $parser->feature( $class, $name, 1 );             # enable a feature
 
@@ -1926,8 +1942,8 @@ of any feature.
                                                    # operator is supported
  my $LIKE = $parser->feature('valid_operators','LIKE');
 
-See the section below on "Backwards Compatibility" for use
-of the feature() method with SQL::Statement 0.1x style parameters.
+See the section below on "Backwards Compatibility" for use of
+the feature() method with SQL::Statement 0.1x style parameters.
 
 =head2 list()
 
@@ -1937,11 +1953,14 @@ of the feature() method with SQL::Statement 0.1x style parameters.
 
 =head2 Dialect Configuration Files
 
-Sorry, documentation still in progress :-(.
+These will change completely when Tim finalizes the DBI get_info method.
 
 =head2 Parse Structures
 
-Here are some further examples of the data structures returned by the structure() method after a call to parse().  Only specific details are shown for each SQL instance, not the entire struture.
+Here are some further examples of the data structures returned
+by the structure() method after a call to parse().  Only
+specific details are shown for each SQL instance, not the entire
+struture.
 
  'SELECT make,model, FROM cars'
 
@@ -1988,9 +2007,19 @@ Here are some further examples of the data structures returned by the structure(
 
 =head2 Backwards Compatibility
 
-This module can be used in conjunction with SQL::Statement, version 0.2 and higher.  Earlier versions of SQL::Statement included a SQL::Parser as a submodule that used slightly different syntax than the current version.  The current version supports all of this earlier syntax although new users are encouraged to use the new syntax listed above.  If the syntax listed below is used, the module should be able to be subclassed exactly as it was with the older SQL::Statement versions and will therefore not require any modules or scripts that used it to make changes.
+This module can be used in conjunction with SQL::Statement,
+version 0.2 and higher.  Earlier versions of SQL::Statement
+included a SQL::Parser as a submodule that used slightly
+different syntax than the current version.  The current version
+supports all of this earlier syntax although new users are
+encouraged to use the new syntax listed above.  If the syntax
+listed below is used, the module should be able to be subclassed
+exactly as it was with the older SQL::Statement versions and
+will therefore not require any modules or scripts that used it
+to make changes.
 
-In the old style, features of the parser were accessed with this syntax:
+In the old style, features of the parser were accessed with this
+syntax:
 
  feature('create','type_blob',1); # allow BLOB as a data type
  feature('create','type_blob',0); # disallow BLOB as a data type
@@ -2006,22 +2035,25 @@ The same settings could be acheieved in calls to new:
       },
   );
 
-Both of these styles of setting features are supported in the current SQL::Parser.
+Both of these styles of setting features are supported in the
+current SQL::Parser.
 
 =head1 ACKNOWLEDGEMENTS
 
-*Many* thanks to Ilya Sterin who wrote most of code for the build() method and who assisted on the parentheses parsing code and who proved a great deal of support, advice, and testing throughout the development of the module.
+*Many* thanks to Ilya Sterin who wrote most of code for the
+ build() method and who assisted on the parentheses parsing code
+ and who proved a great deal of support, advice, and testing
+ throughout the development of the module.
 
 =head1 AUTHOR & COPYRIGHT
 
  This module is copyright (c) 2001 by Jeff Zucker.
  All rights reserved.
 
- The module may be freely distributed under the same terms as Perl
- itself using either the "GPL License" or the "Artistic License"
- as specified in the Perl README file.
+ The module may be freely distributed under the same terms as
+ Perl itself using either the "GPL License" or the "Artistic
+ License" as specified in the Perl README file.
 
  Jeff can be reached at: jeff@vpservices.com.
 
 =cut
-

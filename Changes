@@ -1,22 +1,40 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.002, released 5 February, 2002
+----------------------------------------
+
+ * added backwards compatiblity: both SQL::Statement and
+   SQL::Parser now work in perl version 5.004 and above.
+
+ * changed defaults for DBD::CSV so it now accepts new SQL
+   without adding extra flags to scripts
+
+ * added support for SQL comments
+
+ * added support for temporary tables and on commit clauses in
+   CREATE statements and drop behaviour flags in DROP statements
+   (SQL::Parser only, not supported by SQL::Statement)
+
+ * fixed bugs in qualified column names (e.g. tableA.*), and in
+   joins using ON or WHERE
+
 Version 1.001, released January 17,2002
 ---------------------------------------
 
-Fixed bug in UPDATE that caused the new value to be a hash rather than
-a scalar.
+Fixed bug in UPDATE that caused the new value to be a hash
+rather than a scalar.
 
 Version 1.0, released January 15, 2002
 --------------------------------------
 
-This is the first CPAN release of the pure perl version of the module.
-It was previously released in an XS version by Jochen Wiedman who has
-turned over maintenance of it to me.
+This is the first CPAN release of the pure perl version of the
+module.  It was previously released in an XS version by Jochen
+Wiedman who has turned over maintenance of it to me.
 
 The new Pure Perl version of SQL::Statement supports everything
 supported by the XS version and, additionally, at least partial
-support for the following features that are not supported at all by
-the XS version:
+support for the following features that are not supported at all
+by the XS version:
 
  * Explicit and implicit joins
  * Table name aliases
@@ -29,4 +47,6 @@ the XS version:
  * Alphabetic comparison in WHERE clauses
  * Ordering of text that looks like a number
  * Verbose error messages for both Parsing and Execution errors
+
+
 

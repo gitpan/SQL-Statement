@@ -2,34 +2,54 @@ README FILE FOR MODULES SQL::Statement and SQL::Parser
 
 WHO NEEDS IT?
 
-If you use the DBI drivers for flatfiles, Excel spreadsheets, or formats such as XML via the CSV, AnyData, or Excel DBDs, this distribution will greatly expand the range of supported SQL, as well as provide support for text-like numbers and alphabetic comparisons previously missing in those drivers.  Some of the features included for the first time in this release are partial support for multi-table joins, for set and string functions, for numeric expressions, for the IN and BETWEEN predicates and much more.
+If you use the DBI drivers for flatfiles, Excel spreadsheets, or
+formats such as XML via the CSV, AnyData, or Excel DBDs, this
+distribution will greatly expand the range of supported SQL, as
+well as provide support for text-like numbers and alphabetic
+comparisons previously missing in those drivers.  Some of the
+features included for the first time in this release are partial
+support for multi-table joins, for set and string functions, for
+numeric expressions, for the IN and BETWEEN predicates and much
+more.
 
 WHAT IS IT?
 
-The SQL::Statement and SQL::Parser modules are primarily intended as a means to provide a SQL engine for DBI drivers such as DBD::CSV, DBD::AnyData, and DBD::Excel.  In addition, they can be used to validate a limited subset of SQL statements, or as a subclassable base for other modules needing SQL capabilities.
+The SQL::Statement and SQL::Parser modules are primarily
+intended as a means to provide a SQL engine for DBI drivers such
+as DBD::CSV, DBD::AnyData, and DBD::Excel.  In addition, they
+can be used to validate a limited subset of SQL statements, or
+as a subclassable base for other modules needing SQL
+capabilities.
 
 HOW DO I INSTALL IT?
 
-If you are familiar with the standard make/nmake procedures, simply do as always:
+If you are familiar with the standard make/nmake procedures,
+simply do as always:
 
    perl Makefile.PL
    make
    make test
    make install
 
-Since the modules are pure perl, you may also simply copy the enclosed SQL directory into your lib directory (either your main site/lib or a private area).
-
-HOW DO I USE IT?
-
-To use the modules with DBD::AnyData, simply install them as described above.  To use them with DBD::CSV or DBD::Excel, install them and place these two lines at the top of the script that calls them:
-
-  use vars qw($extend_sql);
-  $extend_sql++;
+You may also use nmake or dmake on windows.  Since the modules
+are pure perl, you may also simply copy the enclosed SQL
+directory into your lib directory (either your main site/lib or
+a private area).
 
 WHERE DO I FIND OUT MORE?
 
-If you are using it via one of the DBD drivers, see the help documentation for that driver.  If you are subclassing the moduels, there are extensive help documents included with the modules.  Use perldoc or pod2html or simply read the POD section of the .pm files.  For further questions, write to the comp.lang.perl.modules newsgroup or the dbi-users@perl.org listserv.
+If you are using it via one of the DBD drivers, see the help
+documentation for that driver.  If you are subclassing the
+moduels, there are extensive help documents included with the
+modules.  Use perldoc or pod2html or simply read the POD section
+of the .pm files.  For further questions, write to the
+comp.lang.perl.modules newsgroup or the dbi-users@perl.org
+listserv.
 
 WHO DUNNIT?
 
-The original XS versions of the modules were written by Jochen Wiedmann.  The current, pure perl versions were rewritten (mostly from the ground up) and are currently maintained by Jeff Zucker <jeff@vpservices.com>.
+The original XS versions of the modules were written by Jochen
+Wiedmann.  The current, pure perl versions were rewritten
+(mostly from the ground up) by Jeff Zucker 
+<jeff@vpservices.com>.  Both versions are currently maintained
+by Jeff.
