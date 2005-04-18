@@ -11,7 +11,7 @@ use strict;
 use SQL::Parser;
 use SQL::Eval;
 use SQL::Statement::RAM;
-use vars qw($VERSION $numexp $s2pops $arg_num $dlm $warg_num $HAS_DBI $DEBUG);
+use vars qw($VERSION $new_execute $numexp $s2pops $arg_num $dlm $warg_num $HAS_DBI $DEBUG);
 BEGIN {
     eval { require 'Data/Dumper.pm'; $Data::Dumper::Indent=1};
     *bug = ($@) ? sub {warn @_} : sub { print Data::Dumper::Dumper(\@_) };
@@ -31,7 +31,7 @@ BEGIN {
 
 #use locale;
 
-$VERSION = '1.11';
+$VERSION = '1.12';
 $dlm = '~';
 $arg_num=0;
 $warg_num=0;
@@ -56,11 +56,11 @@ sub new {
     my $class  = shift;
     my $sql    = shift;
     my $flags  = shift;
-    #
+
     # IF USER DEFINED extend_csv IN SCRIPT
     # USE THE ANYDATA DIALECT RATHER THAN THE CSV DIALECT
     # WITH DBD::CSV
-    #
+
     if ($main::extend_csv or $main::extend_sql ) {
        $flags = SQL::Parser->new('AnyData');
     }
@@ -150,7 +150,8 @@ sub prepare {
        }
        for (@$columns) {
            my $newcol = $_;
-           my $col_obj = delete $self->{col_obj}->{$newcol};
+           #  my $col_obj = delete $self->{col_obj}->{$newcol};
+           my $col_obj =  $self->{col_obj}->{$newcol};
            if ($col_obj and ref($col_obj)=~/::Column$/ ) {
                $self->{"computed_column"}->{$newcol} = $col_obj
                    if defined $col_obj->function;
@@ -184,6 +185,7 @@ sub prepare {
 
 sub execute {
     my($self, $data, $params) = @_;
+    $new_execute=1;
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
           $self->{'data'}) =  (0,0,[]) and return 'OEO' if $self->{no_execute};
     $self->{procedure}->{data}=$data if $self->{procedure};
@@ -193,15 +195,25 @@ sub execute {
     return $self->do_err( 'No command found!') unless $command;
     ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
           $self->{'data'}) = $self->$command($data, $params);
+
+    # MUNGE COLUMN NAME CASE
+
+    # $sth->{NAME} IS ALWAYS UPPER-CASED DURING PROCESSING
+    #
     my $names = $self->{NAME};
+
+    # FOR ASTERISKED QUERIES - WE USE STORED CASE OF COLUMNS
+    # 
     @$names = map {
-        my $org = $self->{ORG_NAME}->{$_}; # from the file header
+        my $org = $self->{ORG_NAME}->{$_};
         $org =~ s/^"//;
         $org =~ s/"$//;
         $org =~ s/""/"/g;
         $org;
     } @$names  if $self->{asterisked_columns};
-    $names = $self->{org_col_names} unless $self->{asterisked_columns};
+
+    $names = $self->{org_col_names}  unless $self->{asterisked_columns};
+
     my $newnames;
 #
 #	DAA
@@ -214,6 +226,7 @@ sub execute {
         push @$newnames,$newname;
     }
     $self->{NAME} = $newnames;
+
     my $tables;
     @$tables = map {$_->{"name"}} @{ $self->{"tables"} };
     delete $self->{'tables'};  # Force closing the tables
@@ -223,54 +236,9 @@ sub execute {
     $self->{'NUM_OF_ROWS'} || '0E0';
 }
 
-sub CONNECT ($$$) {
-    my($self, $data, $params) = @_;
-    if ($self->can('open_connection')) {
-        my $dsn = $self->{connection}->{dsn};
-        my $tbl = $self->{connection}->{tbl};
-        return $self->open_connection($dsn,$tbl,$data,$params)
-    }
-    (0, 0);
-}
-
-# defunct, leave temporarily as comparison
-sub CREATE_RAM_TABLE {
-    my($self, $data, $params) = @_;
-    my $tname = $self->{table_names}->[0];
-    my $tables = $data->{Database}->{sql_ram_tables} || {};
-    if ($tables->{uc $tname}) {
-        die "Cannot create table $tname: Already exists";
-    }
-    my($data_tbl) = shift @{ $self->{params} };
-    my $col_names = [];
-    if (ref $data_tbl eq 'ARRAY') {
-        $col_names = shift @$data_tbl;
-    }
-    elsif (ref($data_tbl) =~ /::db$/) {
-        my $sql = shift @{ $self->{params} } || die "No SQL query supplied!\n";
-        my @params =  @{ $self->{params} };
-        @params = () unless @params;
-        my $sth = $data_tbl->prepare($sql);
-        $sth->execute(@params);
-        my $data_ary = $sth->fetchall_arrayref;
-        $col_names = $sth->{NAME};
-        $data_tbl->disconnect unless $self->{ram_table_keep_connection};
-        $data_tbl = $data_ary;
-    }
-    else {
-        die "RAM tables must supply an AoA or a dbh\n";
-    }
-    my $ramTable = SQL::Statement::RAM->new(
-        $tname, $col_names, $data_tbl
-    );
-    $ramTable->{all_cols} ||= $col_names;
-    $data->{Database}->{sql_ram_tables}->{uc $tname} = $ramTable;
-    my($eval,$foo) = $self->open_tables($data, 1, 1);
-    return undef unless $eval;
-    (0, 0);
-}
 sub CREATE ($$$) {
     my($self, $data, $params) = @_;
+    my $names;
     # CREATE TABLE AS ...
     if (my $subquery = $self->{subquery}) {
          my $sth;
@@ -278,15 +246,22 @@ sub CREATE ($$$) {
          if ($subquery =~ /^IMPORT/i) {
              $sth = $data->{Database}->prepare("SELECT * FROM $subquery");
              $sth->execute(@$params);
+             $names  = $sth->{NAME};
          }
          # AS SELECT
          else {
              $sth = $data->{Database}->prepare($subquery);
              $sth->execute();
+             $names  = $sth->{NAME};
          }
+         $names = $sth->{NAME} unless defined $names;
          my $tbl_data = $sth->{f_stmt}->{data};
 	 my $tbl_name = $self->tables(0)->name;
-	 my @tbl_cols = map {$_->name} $sth->{f_stmt}->columns;
+	 # my @tbl_cols = map {$_->name} $sth->{f_stmt}->columns;
+         #my @tbl_cols=map{$_->name} $sth->{f_stmt}->columns if $sth->{f_stmt};
+         my @tbl_cols;
+#            @tbl_cols=@{ $sth->{NAME} } unless @tbl_cols;
+         @tbl_cols=@{ $names } unless @tbl_cols;
          my $create_sql = "CREATE TABLE $tbl_name ";
             $create_sql = "CREATE TEMP TABLE $tbl_name "
                         if $self->{"is_ram_table"};
@@ -344,7 +319,7 @@ sub INSERT ($$$) {
     my($eval,$all_cols) = $self->open_tables($data, 0, 1);
     return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns($eval, $all_cols) if scalar ($self->columns());
+    $self->verify_columns($data,$eval, $all_cols) if scalar ($self->columns());
     my($table) = $eval->table($self->tables(0)->name());
     $table->seek($data, 0, 2);
     my($array) = [];
@@ -379,7 +354,7 @@ sub DELETE ($$$) {
     my($eval,$all_cols) = $self->open_tables($data, 0, 1);
     return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns($eval, $all_cols);
+    $self->verify_columns($data,$eval, $all_cols);
     my($table) = $eval->table($self->tables(0)->name());
     my($affected) = 0;
     my(@rows, $array);
@@ -421,7 +396,7 @@ sub UPDATE ($$$) {
     my($eval,$all_cols) = $self->open_tables($data, 0, 1);
     return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns($eval, $all_cols);
+    $self->verify_columns($data,$eval, $all_cols);
     my($table) = $eval->table($self->tables(0)->name());
     my $tname = $self->tables(0)->name();
     my($affected) = 0;
@@ -564,7 +539,7 @@ sub JOIN {
     my($eval,$all_cols) = $self->open_tables($data, 0, 0);
     return undef unless $eval;
     $eval->params($params);
-    $self->verify_columns( $eval, $all_cols );
+    $self->verify_columns( $data,$eval, $all_cols );
     if ($self->{"join"}->{"keycols"} 
      and $self->{"join"}->{"table_order"}
      and scalar @{$self->{"join"}->{"table_order"}} == 0
@@ -796,7 +771,7 @@ sub SELECT ($$) {
         ($eval,$all_cols) = $self->open_tables($data, 0, 0);
         return undef unless $eval;
         $eval->params($params);
-        $self->verify_columns( $eval, $all_cols );
+        $self->verify_columns( $data,$eval, $all_cols );
         $tableName = $self->tables(0)->name();
         $table = $eval->table($tableName);
     }
@@ -933,9 +908,18 @@ sub SELECT ($$) {
     if ($self->{"join"}) {
           $e = $table;
     }
+
+    # begin count for limiting if there's a limit clasue and no order clause
+    #
+    my $limit_count = 0 if $self->limit and !$self->order;
+    my $row_count = 0;
+    my $offset = $self->offset || 0;
     while (my $array = $table->fetch_row($data)) {
-        if ($self->eval_where($e,$tableName,$array,\%funcs)) {
+        if (eval_where($self,$e,$tableName,$array,\%funcs)) {
+            next if defined($limit_count) and $row_count++ < $offset;
+            $limit_count++ if defined $limit_count;
             $array = $self->{fetched_value} if $self->{fetched_from_key};
+
             # Note we also include the columns from @extraSortCols that
             # have to be ripped off later!
             @extraSortCols = () unless @extraSortCols;
@@ -944,8 +928,14 @@ sub SELECT ($$) {
                           : $self->{func_vals}->{$_} ;
                           } (@$cList, @extraSortCols);
             push(@$rows, \@row);
-            return (scalar(@$rows),scalar @{$self->{column_names}},$rows)
- 	        if $self->{fetched_from_key};
+
+            # We quit here if its a primary key search
+            # or if there's a limit clause without order clause
+            # and the limit has been reached
+            #
+            return (scalar(@$rows),$numFields,$rows)
+ 	        if $self->{fetched_from_key}
+                or (defined($limit_count) and $limit_count >= $self->limit);
         }
     }
     if (@order_by) {
@@ -1066,11 +1056,12 @@ sub SELECT ($$) {
         }
     }
 ###################################################################
-    if (defined $self->{"limit_clause"}) {
-        my $offset = $self->{"limit_clause"}->offset || 0;
-        my $limit  = $self->{"limit_clause"}->limit  || 0;
+    if ( defined $self->limit ) {
+        my $offset = $self->offset || 0;
+        my $limit  = $self->limit  || 0;
         @$rows = splice @$rows, $offset, $limit;
     }
+    return $self->group_by($rows) if $self->{group_by};
     if ($self->{"set_function"}) {
         my $numrows = scalar( @$rows );
         my $numcols = scalar @{ $self->{"NAME"} };
@@ -1078,7 +1069,7 @@ sub SELECT ($$) {
         my %colnum = map {$_=>$i++} @{ $self->{"NAME"} };
         for my $i(0 .. scalar @{$self->{"set_function"}} -1 ) {
             my $arg = $self->{"set_function"}->[$i]->{"arg"};
-            $self->{"set_function"}->[$i]->{"sel_col_num"} = $colnum{$arg} if defined $colnum{$arg};
+            $self->{"set_function"}->[$i]->{"sel_col_num"} = $colnum{$arg} if defined $arg and defined $colnum{$arg};
         }
         my($name,$arg,$sel_col_num);
         my @set;
@@ -1095,7 +1086,8 @@ sub SELECT ($$) {
                   $final_row[$sf_index]++;
 	      }
               else {
-                my $v = $c->[$sf->{"sel_col_num"}];
+                my $cn = $sf->{"sel_col_num"};
+                my $v = $c->[$cn] if defined $cn;
                 my $name = $sf->{"name"};
                 next unless defined $v;
                 my $final = $final_row[$sf_index];
@@ -1140,7 +1132,66 @@ sub SELECT ($$) {
     }
     (scalar(@$rows), $numFields, $rows);
 }
+sub group_by {
+    my($self,$rows)=@_;
+#    my @columns_requested = map {$_->name} @{$self->{columns}};
+    my $columns_requested = $self->{columns};
+    my $numcols=scalar(@$columns_requested);
+#    my $numcols=scalar(@{$self->{"set_function"}});
+    my $i=0;
+    my %colnum = map {$_=>$i++} @{ $self->{"NAME"} };
+#    my %colnum = map {$_=>$i++} @columns_requested;
+    my $set_cols;
 
+    my @all_cols=();
+    my $set_columns = $self->{set_function};
+    for my $c1(@$columns_requested) {
+        for my $c2(@$set_columns) {
+#            printf "%s %s\n",$c1->{name}, $c2->{arg};
+            next unless uc $c1->{name} eq uc $c2->{arg};
+            $c1->{arg}= $c2->{arg};
+            $c1->{name}= $c2->{name};
+            last;
+        }
+        push @all_cols,$c1;
+    }
+#    $self->{set_function}=\@all_cols;
+
+    for (@{ $self->{"set_function"} }) {
+       push @$set_cols, $_->{name};
+    }
+    my($keycol,$keynum);
+    for my $i(0 .. $numcols-1 ) {
+        my $arg = $self->{"set_function"}->[$i]->{"arg"};
+#         print $self->{NAME}->[$i],$arg,"\n";
+        if (!$arg ) {
+            $arg =$set_cols->[$i];
+#            $arg =$columns_requested[$i];
+            $keycol = $self->{"set_function"}->[$i]->{"name"};
+            $keynum =  $colnum{uc $arg};
+        }
+        $self->{"set_function"}->[$i]->{"sel_col_num"} = $colnum{uc $arg};
+    }
+
+    my $display_cols = $self->{"set_function"};
+    my $numFields    = scalar(@$display_cols);
+#    my $keyfield = $self->{group_by}->[0];
+#    my $keynum=0;
+#    for my$i(0..$#{$display_cols}) {
+#        $keynum=$i if uc $display_cols->[$i]->{name} eq uc $keyfield;
+#printf "%s.%s,%s\n",$i,$display_cols->[$i]->{name},$keyfield;
+#    }
+    my $g = SQL::Statement::Group->new($keynum,$display_cols,$rows);
+    $rows = $g->calc;
+    my $x = [ map {$_->{name}} @$display_cols ];
+    $self->{NAME} = [ map {$_->{name}} @$display_cols ];
+    %{$self->{ORG_NAME}} = map {
+        my $n = $_->{name};
+        $n .= "_" . $_->{arg} if $_->{arg};
+        $_->{name}=>$n;
+    } @$display_cols ;
+    return (scalar(@$rows), $numFields, $rows);
+}
 sub anycmp($$) {
     my ($a,$b) = @_;
     $a = '' unless defined $a;
@@ -1178,9 +1229,18 @@ sub eval_where {
 		while ( ($f,$fval) = each %$funcs);
 
     my @truths;
-    $arg_num=0;
+    $arg_num=0;  # set placeholder start
     my $where = $self->{"where_clause"} || return 1;
-    return $self->process_predicate ($where,$eval,$rowhash);
+    my $match = $self->process_predicate ($where,$eval,$rowhash);
+
+    # we set the $new_execute flag to 0 to allow reuse;
+    # it's set to 1 at the start of execute()
+    # we set it here because all predicates have been processed
+    # at this point
+    #
+    $new_execute=0;  # we don't need to get the reuse values again;
+
+    return $match;
 }
 
 
@@ -1202,10 +1262,10 @@ sub process_predicate {
 	# We can always return if match1 is true.   We short-circuit the OR
 	# with a true value, or short-circuit the AND with a false value on
         # negation.
-	my $match1 = $self->process_predicate($pred->{"arg1"},$eval,$rowhash);
+	my $match1 = process_predicate($self,$pred->{"arg1"},$eval,$rowhash);
 	return $pred->{'neg'} ? 0 : 1 if $match1;
 
-	my $match2 = $self->process_predicate($pred->{"arg2"},$eval,$rowhash);
+	my $match2 = process_predicate($self,$pred->{"arg2"},$eval,$rowhash);
 
 	# Same logic applies for short-circuit on the second argument.
 	return $pred->{'neg'} ? 0 : 1 if $match2;
@@ -1214,14 +1274,14 @@ sub process_predicate {
 	return $pred->{'neg'} ? 1 : 0;
     }
     elsif ($pred->{op} eq 'AND') {
-        my $match1 = $self->process_predicate($pred->{"arg1"},$eval,$rowhash);
+        my $match1 = process_predicate($self,$pred->{"arg1"},$eval,$rowhash);
         if ($pred->{"neg"}) {
 	    return 1 unless $match1;
         }
         else {
 	    return 0 unless $match1;
 	}
-        my $match2 = $self->process_predicate($pred->{"arg2"},$eval,$rowhash);
+        my $match2 = process_predicate($self,$pred->{"arg2"},$eval,$rowhash);
         if ($pred->{"neg"}) {
             return $match2 ? 0 : 1;
         }
@@ -1230,38 +1290,64 @@ sub process_predicate {
 	}
     }
     else {
-        my $val1 = $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
-        my $val2 = $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
-        my $op   = $pred->{op};
+
+        # The old way, now replaced, called get_row_value everytime
+        #
+        # my $val1 = $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
+        # my $val2 = $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
+
+        # define types that we only need to call get_row_value on once
+        # per execute
+        #
+        my %is_value = map {$_=>1} qw(placeholder string number null);
+
+        # use a reuse value if defined, get_row_value() otherwise
+        #
+        # except we ignore the reuse value if this is the first pass
+        # on an execute() since placeholders need to be reset on the
+        # first pass
+        #
+        # $new_execute is set to 1 at the start of execute()
+        # and set to 0 at the end of  eval_where()
+        #
+        my $val1 = (!$new_execute and defined $pred->{arg1}->{reuse})
+                 ? $pred->{arg1}->{reuse}
+	         : $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
+        my $val2 = (!$new_execute and defined $pred->{arg2}->{reuse})
+                 ? $pred->{arg2}->{reuse}
+	         : $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
+
+        # the first time we call get_row_value, we set the reuse value
+        # for the argument object with its scalar value
+        #
+        my $type1 = $pred->{arg1}->{type} if ref($pred->{arg1}) eq 'HASH';
+        my $type2 = $pred->{arg2}->{type} if ref($pred->{arg2}) eq 'HASH';
+	$pred->{arg1}->{reuse} = $val1
+                              if $type1 and $is_value{$type1} and $new_execute;
+	$pred->{arg2}->{reuse} = $val2
+                              if $type2 and $is_value{$type2} and $new_execute;
+
+        my $op     = $pred->{op};
+        my $opfunc = $op;
         #
         # currently we treat NULL and '' as the same
         # eventually fix
         #
-
-        # always true
-        if ("DBD or AnyData") {
-  	    	if ( $op !~ /^IS/i and (
-        	      !defined $val1 or $val1 eq '' or
-        	      !defined $val2 or $val2 eq '' 
-        	    )) {
-                  $op = $s2pops->{"$op"}->{'s'};
-	    	}
-            elsif (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
-                    $op = ( is_number($val1) and is_number($val2) )
-                        ? $s2pops->{"$op"}->{'n'}
-                        : $s2pops->{"$op"}->{'s'};
-	    	}
-		}
-        # someday ...
-        else {
-            if (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
-                    $op = ( is_number($val1) and is_number($val2) )
-                    ? $s2pops->{"$op"}->{'n'}
-                    : $s2pops->{"$op"}->{'s'};
-		    }
-        }
+    	if ( $op !~ /^IS/i and (
+       	      !defined $val1 or $val1 eq '' or
+       	      !defined $val2 or $val2 eq '' 
+  	)) {
+              $op = $s2pops->{"$op"}->{'s'};
+	}
+        elsif (defined $val1 and defined $val2 and $op !~ /^IS/i ) {
+              $op = ( is_number($val1) and is_number($val2) )
+                  ? $s2pops->{"$op"}->{'n'}
+                  : $s2pops->{"$op"}->{'s'};
+	}
         my $neg = $pred->{"neg"};
-        if (ref $eval !~ /TempTable/) {
+        my $table_type = ref($eval);
+        if ($table_type !~ /TempTable/) {
+#        if (ref $eval !~ /TempTable/) {
             my($table) = $eval->table($self->tables(0)->name());
             if ($pred->{op} eq '=' and !$neg and $table->can('fetch_one_row')){
                 my $key_col = $table->fetch_one_row(1,1);
@@ -1272,7 +1358,20 @@ sub process_predicate {
 	        }
             }
 	}
-        my $match = $self->is_matched($val1,$op,$val2) || 0;
+#       my $match = $self->is_matched($val1,$op,$val2) || 0;
+       my $match;
+        if ($op) {
+            $match = $self->is_matched($val1,$op,$val2) || 0;
+	}
+        else {
+            my $sub = $self->{opts}->{function_defs}->{uc $opfunc}->{sub}->{value};
+            my $func = $self->{loaded_function}->{uc $opfunc}
+              ||= SQL::Statement::Util::Function->new(
+                      uc $opfunc, $sub, [$val1,$val2]
+                  );
+            $func->{args}=[$val1,$val2];
+	    $match = $self->get_row_value( $func, $eval, $rowhash );
+	}
         if ($pred->{"neg"}) {
            $match = $match ? 0 : 1;
         }
@@ -1314,49 +1413,12 @@ sub is_matched {
     	0;
 }
 
-sub is_matched_old {
-    my($self,$val1,$op,$val2)=@_;
-    ###    return unless $val1; screws up null comparison, why was this here?
-    # if DBD::CSV or AnyData
-        if ($op eq 'IS') {
-            return 1 if (!defined $val1 or $val1 eq '');
-            return 0;
-        }
-        $val1 = '' unless defined $val1;
-        $val2 = '' unless defined $val2;
-        if ($op eq 'IS') {
-            return defined $val1 ? 0 : 1;
-        }
-    return undef if !defined $val1 or !defined $val2;
-    if ($op =~ /LIKE|CLIKE/i) {
-        $val2 = quotemeta($val2);
-        $val2 =~ s/\\%/.*/g;
-        $val2 =~ s/_/./g;
-    }
-    if ( !$self->{"alpha_compare"} && $op =~ /lt|gt|le|ge/ ) {
-        return 0;
-    }
-    if ($op eq 'LIKE' )  { return $val1 =~ /^$val2$/s;  }
-    if ($op eq 'CLIKE' ) { return $val1 =~ /^$val2$/si; }
-    if ($op eq 'RLIKE' ) { return $val1 =~ /$val2/is;   }
-    if ($op eq '<' ) { return $val1 <  $val2; }
-    if ($op eq '>' ) { return $val1 >  $val2; }
-    if ($op eq '==') { return $val1 == $val2; }
-    if ($op eq '!=') { return $val1 != $val2; }
-    if ($op eq '<=') { return $val1 <= $val2; }
-    if ($op eq '>=') { return $val1 >= $val2; }
-    if ($op eq 'lt') { return $val1 lt $val2; }
-    if ($op eq 'gt') { return $val1 gt $val2; }
-    if ($op eq 'eq') { return $val1 eq $val2; }
-    if ($op eq 'ne') { return $val1 ne $val2; }
-    if ($op eq 'le') { return $val1 le $val2; }
-    if ($op eq 'ge') { return $val1 ge $val2; }
-}
-
-sub data {
+sub fetch {
     my($self) = @_;
     $self->{data} ||= [];
-    return $self->{data};
+    my $row = shift @{ $self->{data} };
+    return undef unless $row and scalar @$row;
+    return $row;
 }
 sub open_tables {
     my($self, $data, $createMode, $lockMode) = @_;
@@ -1383,6 +1445,8 @@ sub open_tables {
         elsif ($data->{Database}->{sql_ram_tables}->{uc $name}) {
             $t->{"$name"} = $data->{Database}->{sql_ram_tables}->{uc $name};
             $t->{"$name"}->{index}=0;
+ 	    $t->{$name}->init_table($data,$name,$createMode,$lockMode)
+                if $t->{$name}->can('init_table');
 	}
         elsif ( $self->{"is_ram_table"} or !($self->can('open_table'))) {
             $t->{"$name"} = $data->{Database}->{sql_ram_tables}->{uc $name}
@@ -1409,7 +1473,10 @@ sub open_tables {
 	}
 my @cnames;
 #$DEBUG=1;
-for my $c(@{$t->{"$name"}->{"col_names"}}) {
+#for my $c(@{$t->{"$name"}->{"col_names"}}) {
+my $table_cols= $t->{"$name"}->{"org_col_names"};
+   $table_cols= $t->{"$name"}->{"col_names"} unless $table_cols;
+for my $c(@$table_cols) {
   my $newc;
   if ($c =~ /^"/) {
  #    $c =~ s/^"(.+)"$/$1/;
@@ -1443,16 +1510,30 @@ $t->{"$name"}->{"col_names"} = \@cnames;
 	}
         @c = ( @c, @newcols );
     }
-    my $all_cols = $self->{all_cols} 
-                || [ map {$_->{name} }@{$self->{columns}} ]
-                || [];
-    @$all_cols = (@$all_cols,@c);
-    $self->{all_cols} = $all_cols;
+    ##################################################
+    # Patch from Cosimo Streppone <cosimoATcpan.org>
+
+    # my $all_cols = $self->{all_cols} 
+    #             || [ map {$_->{name} }@{$self->{columns}} ]
+    #             || [];
+    # @$all_cols = (@$all_cols,@c);
+    # $self->{all_cols} = $all_cols;
+    my $all_cols = [];
+    if(!$self->{all_cols}) {
+        $all_cols   = [ map {$_->{name}} @{$self->{columns}} ];
+        $all_cols ||= []; # ?
+        @$all_cols  = (@$all_cols, @c);
+        $self->{all_cols} = $all_cols;
+    }
+    ##################################################
     return SQL::Eval->new({'tables' => $t}), \@c;
 }
-
 sub verify_columns {
-    my( $self, $eval, $all_cols )  = @_;
+    my( $self, $data,$eval, $all_cols )  = @_;
+    #
+    # NOTE FOR LATER:
+    # perhaps cache column names and skip this after first table open
+    #
     $all_cols ||= [];
     my @tmp_cols  = @$all_cols;
     my $usr_cols;
@@ -1606,28 +1687,11 @@ sub verify_columns {
             $self->{columns}->[$i]  = $col_func;
         }
     }
-=pod
-    if ( my $funcs = $self->{select_procedure} ) {
-        for my $i(0..$#{$self->{columns}}) {
- 	      my $fcname = $self->{columns}->[$i]->name;
- 	      if (my $col_func=$funcs->{$fcname}) {
-                  $self->{columns}->[$i]->{function} =
-                      my $alias = $self->{ORG_NAME}->{$fcname};
-                      SQL::Statement::Func->new($col_func,$alias);
-                  #
-                  # USE THE ALIAS FOR THE NAME OF CONSTRUCTED COLUMNS
-                  #
-                  #$self->{columns}->[$i]->{name}=$self->{ORG_NAME}->{$fcname};
-                  $self->{columns}->[$i]->{name}=$alias;
-	      }
-        }
-    }
-=cut
     #
-    # CLEAN parser's {strcut} - no longer needed
+    # CLEAN parser's {strcut} - no, maybe needed by second execute?
     #
-    delete $self->{opts};
-    delete $self->{select_procedure};
+    # delete $self->{opts};  # need $opts->{function_defs}
+    # delete $self->{select_procedure};
     return $fully_qualified_cols;
 }
 
@@ -1676,16 +1740,9 @@ sub row_values {
 
 }
 
-=pod
-
-    if (ref $structure eq ) {
-    }
-
-=cut
-
 sub get_row_value {
     my($self,$structure,$eval,$rowhash) = @_;
-#    bug($self) unless defined $structure;
+#    bug($structure);
     $structure = '' unless defined $structure;
     return $rowhash->{$structure} unless ref $structure;
     my $type = $structure->{"type"} if ref $structure eq 'HASH';
@@ -1713,7 +1770,10 @@ sub get_row_value {
     if ( ref($structure) =~ /::Function/ ) {
         my @argslist=();
         for my $arg(@{$structure->args}) {
-            push @argslist, $self->get_row_value($arg,$eval,$rowhash);
+#            my $val = $arg unless ref $arg;
+#            $val = $self->get_row_value($arg,$eval,$rowhash) unless defined $val;
+            my $val = $self->get_row_value($arg,$eval,$rowhash);
+            push @argslist, $val;
 	}
         return $structure->run(
             $self->{procedure}->{data},
@@ -1796,7 +1856,6 @@ sub get_row_value {
                if $vtype eq 'function';
 
         /TRIM/                    &&do {
-
                 my $trim_char = $structure->{"trim_char"} || ' ';
                 my $trim_spec = $structure->{"trim_spec"} || 'BOTH';
                 $trim_char = quotemeta($trim_char);
@@ -1815,33 +1874,6 @@ sub get_row_value {
                 return substr($value,$start-1,$offset)
                    if length $value >= $start-2+$offset;
         };
-=pod
-        ### USER-FUNCTIONS
-        my $newvalue;
-        if ($val_type and $val_type eq 'multiple_args') {
-            my $args = $structure->{value}->{value};
-            for (@$args) {
-                push @$newvalue, $self->get_row_value($_,$eval,$rowhash);
-	    }
-	}
-        $newvalue = [$newvalue] unless ref $newvalue;
-        my $usub =  $structure->{usr_sub}->{value};
-        return undef unless $usub;
-        my($class,$sub) = $usub =~ /^(.*::)([^:]+$)/;
-        if (!$sub) {
-             $class = 'main';
-             $sub = $usub;
-        }
-        $class = 'main' if $class eq '::';
-        $class =~ s/::$//;
-        eval { require "$class.pm" }
-            unless $class eq 'SQL::Statement::Functions' or $class eq 'main';
-        die $@ if $@;
-        die "Can't find subroutine $class"."::$sub\n" unless $class->can($sub);
-        #  $structure->{data} is $sth and contains $dbh, so passed to subs;
-	$structure->{data} ||= $self->{procedure}->{data};
-        return $class->$sub($structure->{data},$rowhash,@$newvalue);
-=cut
     }
 }
 
@@ -1919,6 +1951,8 @@ sub verify_order_cols {
 #use mylibs; zwarn $self->{"sort_spec_list"}; exit;
 }
 
+sub limit ($)  { shift->{limit_clause}->{limit}; }
+sub offset ($) { shift->{limit_clause}->{'offset'}; }
 sub order {
     my $self = shift;
     my $o_num = shift;
@@ -2039,14 +2073,99 @@ sub get_user_func_table {
     my($self,$name,$u_func) = @_;
     my($data_aryref) =$self->get_row_value($u_func,$self,{});
     my $col_names = shift @$data_aryref;
-    my $tempTable = SQL::Statement::TempTable->new(
-        $name, $col_names, $col_names, $data_aryref
+    # my $tempTable = SQL::Statement::TempTable->new(
+    #     $name, $col_names, $col_names, $data_aryref
+    # );
+    my $tempTable = SQL::Statement::RAM->new(
+        $name, $col_names, $data_aryref
     );
     $tempTable->{all_cols} ||= $col_names;
     return $tempTable;
 }
 
-#use SQL::Statement::Func;
+
+package SQL::Statement::Group;
+
+sub new {
+    my $class = shift;
+    my ($keycol,$display_cols,$ary)=@_;
+    my $self = {
+       keycol       => $keycol,
+       display_cols => $display_cols,
+       records      => $ary,
+    };
+    return bless $self, $class;
+}
+sub calc {
+    my $self=shift;
+    $self->ary2hash( $self->{records} );
+    my @cols = @{ $self->{display_cols} };
+    for my $key(@{$self->{keys}}) {
+        my $newrow;
+        my $colnum=0;
+        my %done;
+        my @func;
+        for my $col(@cols) {
+	    if ($col->{arg}) {
+                my $selkey = $col->{sel_col_num};
+$selkey ||= 0;
+		if (!defined $selkey) {
+#use mylibs; zwarn $col;
+#exit;
+		} 
+                $func[$selkey] = $self->calc_cols($key,$selkey)
+                   unless defined $func[$selkey];
+                push @$newrow, $func[$selkey]->{$col->{name}};
+	    }
+            else {
+                push @$newrow, $self->{records}->{$key}->[-1]->[$col->{sel_col_num}];
+#use mylibs; zwarn $newrow;
+#exit;
+	    }
+            $colnum++;
+	}
+        push @{$self->{final}}, $newrow;
+    }
+    return $self->{final};
+}
+sub calc_cols {
+    my($self,$key,$selcolnum)=@_;
+    # $self->{counter}++;
+    my( $sum,$count,$min,$max,$avg );
+    my $ary = $self->{records}->{$key};
+    for my $row(@$ary) {
+        my $val = $row->[$selcolnum];
+        $max = $val if !(defined $max) or SQL::Statement::anycmp($val,$max) > 0;
+        $min = $val if !(defined $min) or SQL::Statement::anycmp($val,$min) < 0;
+        $count++;
+        $sum += $val if $val =~ $SQL::Statement::numexp;
+    }
+    $avg = $sum/$count if $count and $sum;
+    return {
+        AVG   => $avg,
+        MIN   => $min,
+        MAX   => $max,
+        SUM   => $sum,
+        COUNT => $count,
+    };
+}
+
+sub ary2hash {
+    my $self = shift;
+    my $ary  = shift;
+    my $keycolnum = $self->{keycol} || 0;
+    my $hash;
+    my @keys;
+    my %is_key;
+    for my $row(@$ary) {
+        my $key = $row->[$keycolnum];
+#die "@$row" unless defined $key;
+        push @{$hash->{$key}}, $row;
+        push @keys, $key unless $is_key{$key}++;
+    }
+    $self->{records}=$hash;
+    $self->{keys}   =\@keys;
+}
 
 package SQL::Statement::Op;
 
@@ -2156,8 +2275,8 @@ sub new ($$) {
     my $self  = shift;
     bless($self, (ref($proto) || $proto));
 }
-sub limit ($) { shift->{'limit'}; }
-sub offset ($) { shift->{'offset'}; }
+#sub limit ($) { shift->{'limit'}; }
+#sub offset ($) { shift->{'offset'}; }
 
 package SQL::Statement::Param;
 
@@ -2205,8 +2324,8 @@ sub new {
     return bless $self, $class;
 }
 
-sub value { shift->{"value"} }
-sub type  { shift->{"type"} }
+#sub value { shift->{"value"} }
+#sub type  { shift->{"type"} }
 sub name  { shift->{"name"} }
 sub table { shift->{"table"} }
 
@@ -2225,771 +2344,85 @@ sub name  { shift->{"name"} }
 1;
 __END__
 
+=pod
+
 =head1 NAME
 
 SQL::Statement - SQL parsing and processing engine
 
 =head1 SYNOPSIS
 
-    require SQL::Statement;
-
-    # Create a parser
-    my($parser) = SQL::Parser->new('Ansi');
-
-    # Parse an SQL statement
-    $@ = '';
-    my ($stmt) = eval {
-        SQL::Statement->new("SELECT id, name FROM foo WHERE id > 1",
-                            $parser);
-    };
-    if ($@) {
-        die "Cannot parse statement: $@";
-    }
-
-    # Query the list of result columns;
-    my $numColums = $stmt->columns();  # Scalar context
-    my @columns = $stmt->columns();    # Array context
-    # @columns now contains SQL::Statement::Column instances
-
-    # Likewise, query the tables being used in the statement:
-    my $numTables = $stmt->tables();   # Scalar context
-    my @tables = $stmt->tables();      # Array context
-    # @tables now contains SQL::Statement::Table instances
-
-    # Query the WHERE clause; this will retrieve an
-    # SQL::Statement::Op instance
-    my $where = $stmt->where();
-
-    # Evaluate the WHERE clause with concrete data, represented
-    # by an SQL::Eval object
-    my $result = $stmt->eval_where($eval);
-
-    # Execute a statement:
-    $stmt->execute($data, $params);
-
+  # ... depends on what you want to do, see below
 
 =head1 DESCRIPTION
 
-For installing the module, see L<"INSTALLATION"> below.
+The SQL::Statement module implements a pure Perl SQL parsing and execution engine.  While it by no means implements full ANSI standard, it does support many features including column and table aliases, built-in and user-defined functions, implicit and explicit joins, complexly nested search conditions, and other features.
 
-At the moment this POD is lifted straight from Jochen
-Wiedmann's SQL::Statement with the exception of the
-section labeled L<"PURE PERL VERSION"> below which is
-a must read.
+SQL::Statement is a small embeddable Database Management System (DBMS),  This means that it provides all of the services of a simple DBMS except that instead of a persistant storage mechanism, it has two things: 1) an in-memory storage mechanism that allows you to prepare, execute, and fetch from SQL statements using temporary tables and 2) a set of software sockets where any author can plug in any storage mechanism.
 
-The SQL::Statement module implements a small, abstract SQL engine. This
-module is not usefull itself, but as a base class for deriving concrete
-SQL engines. The implementation is designed to work fine with the
-DBI driver DBD::CSV, thus probably not so well suited for a larger
-environment, but I'd hope it is extendable without too much problems.
-
-By parsing an SQL query you create an SQL::Statement instance. This
-instance offers methods for retrieving syntax, for WHERE clause and
-statement evaluation.
-
-=head1 PURE PERL VERSION
-
-This version is a pure perl version of Jochen's original SQL::Statement.  Eventually I will re-write the POD but for now I will document in this section the ways it differs from Jochen's version only and you can assume that things not mentioned in this section remain as described in the rest of this POD.
-
-=head2 Dialect Files
-
-In the ...SQL/Dialect directory are files that define the valid types, reserved words, and other features of the dialects.  Currently the ANSI dialect is available only for prepare() not execute() while the CSV and AnyData dialect support both prepare() and execute().
-
-=head2 New flags
-
-In addition to the dialect files, features of SQL::Statement can be defined by flags sent by subclasses in the call to new, for example:
-
-   my $stmt = SQL::Statement->new($sql_str,$flags);
-
-   my $stmt = SQL::Statement->new($sql_str, {text_numbers=>1});
-
-=over
-
-=item  dialect
-
- Dialect is one of 'ANSI', 'CSV', or 'AnyData'; the default is CSV,
- i.e. the behaviour of the original XS SQL::Statement.
-
-=item  text_numbers
-
- If true, this allows texts that look like numbers (e.g. 2001-01-09
- or 15.3.2) to be sorted as text.  In the original version these
- were treated as numbers and threw warnings as well as failed to sort
- as text.  The default is false, i.e. the original behaviour.  The
- AnyData dialect sets this to true by default, i.e. it allows sorting
- of these kinds of columns.
-
-=item alpha_compare
-
- If true this allows alphabetic comparison.  The original version would
- ignore SELECT statements with clauses like "WHERE col3 < 'c'".  The
- default is false, i.e. the original style.  The AnyData dialect sets
- this to true by default, i.e. it allows such comparisons.
-
-=item LIMIT
-
- The LIMIT clause as described by Jochen below never actually made it
- into the execute() portion of his SQL::Statement, it is now supported.
-
-=item RLIKE
-
- There is an experimental RLIKE operator similar to LIKE but takes a
- perl regular expression, e.g.
-
-      SELECT * FROM foo WHERE bar RLIKE '^\s*Baz[^:]*:$'
-
- Currently this is only available in the AnyData dialect.
-
-=back
-
-=head2 It's Pure Perl
-
-All items in the pod referring to yacc, C, bison, etc. are now only historical since this version has ported all of those portions into perl.
-
-=head2 Creating a parser object
-
-What's accepted as valid SQL, depends on the parser object. There is
-a set of so-called features that the parsers may have or not. Usually
-you start with a builtin parser:
-
-    my $parser = SQL::Parser->new($name, [ \%attr ]);
-
-Currently two parsers are builtin: The I<Ansi> parser implements a proper
-subset of ANSI SQL. (At least I hope so. :-) The I<SQL::Statement> parser
-is used by the DBD:CSV driver.
-
-You can query or set individual features. Currently available are:
-
-=over 8
-
-=item create.type_blob
-
-=item create.type_real
-
-=item create.type_text
-
-These enable the respective column types in a I<CREATE TABLE> clause.
-They are all disabled in the I<Ansi> parser, but enabled in the
-I<SQL::Statement> parser. Example:
-
-=item select.join
-
-This enables the use of multiple tables in a SELECT statement, for
-example
-
-  SELECT a.id, b.name FROM a, b WHERE a.id = b.id AND a.id = 2
-
-=back
-
-To enable or disable a feature, for example I<select.join>, use the
-following:
-
-  # Enable feature
-  $parser->feature("select", "join", 1);
-  # Disable feature
-  $parser->feature("select", "join", 0);
-
-Of course you can query features:
-
-  # Query feature
-  my $haveSelectJoin = $parser->feature("select", "join");
-
-The C<new> method allows a shorthand for setting features. For example,
-the following is equivalent to the I<SQL::Statement> parser:
-
-  $parser = SQL::Statement->new('Ansi',
-                                { 'create' => { 'type_text' => 1,
-                                                'type_real' => 1,
-                                                'type_blob' => 1 },
-                                  'select' => { 'join' => 0 }});
-
-
-=head2 Parsing a query
-
-A statement can be parsed with
-
-    my $stmt = SQL::Statement->new($query, $parser);
-
-In case of syntax errors or other problems, the method throws a Perl
-exception. Thus, if you want to catch exceptions, the above becomes
-
-    $@ = '';
-    my $stmt = eval { SQL::Statement->new($query, $parser) };
-    if ($@) { print "An error occurred: $@"; }
-
-The accepted SQL syntax is restricted, though easily extendable. See
-L<SQL syntax> below. See L<Creating a parser object> above.
-
-
-=head2 Retrieving query information
-
-The following methods can be used to obtain information about a
-query:
-
-=over 8
-
-=item command
-
-Returns the SQL command, currently one of I<SELECT>, I<INSERT>, I<UPDATE>,
-I<DELETE>, I<CREATE> or I<DROP>, the last two referring to
-I<CREATE TABLE> and I<DROP TABLE>. See L<SQL syntax> below. Example:
-
-    my $command = $stmt->command();
-
-=item columns
-
-    my $numColumns = $stmt->columns();  # Scalar context
-    my @columnList = $stmt->columns();  # Array context
-    my($col1, $col2) = ($stmt->columns(0), $stmt->columns(1));
-
-This method is used to retrieve column lists. The meaning depends on
-the query command:
-
-    SELECT $col1, $col2, ... $colN FROM $table WHERE ...
-    UPDATE $table SET $col1 = $val1, $col2 = $val2, ...
-        $colN = $valN WHERE ...
-    INSERT INTO $table ($col1, $col2, ..., $colN) VALUES (...)
-
-When used without arguments, the method returns a list of the
-columns $col1, $col2, ..., $colN, you may alternatively use a
-column number as argument. Note that the column list may be
-empty, like in
-
-    INSERT INTO $table VALUES (...)
-
-and in I<CREATE> or I<DROP> statements.
-
-But what does "returning a column" mean? It is returning an
-SQL::Statement::Column instance, a class that implements the
-methods C<table> and C<name>, both returning the respective
-scalar. For example, consider the following statements:
-
-    INSERT INTO foo (bar) VALUES (1)
-    SELECT bar FROM foo WHERE ...
-    SELECT foo.bar FROM foo WHERE ...
-
-In all these cases exactly one column instance would be returned
-with
-
-    $col->name() eq 'bar'
-    $col->table() eq 'foo'
-
-=item tables
-
-    my $tableNum = $stmt->tables();  # Scalar context
-    my @tables = $stmt->tables();    # Array context
-    my($table1, $table2) = ($stmt->tables(0), $stmt->tables(1));
-
-Similar to C<columns>, this method returns instances of
-C<SQL::Statement::Table>.  For I<UPDATE>, I<DELETE>, I<INSERT>,
-I<CREATE> and I<DROP>, a single table will always be returned.
-I<SELECT> statements can return more than one table, in case
-of joins. Table objects offer a single method, C<name> which
-
-returns the table name.
-
-=item params
-
-    my $paramNum = $stmt->params();  # Scalar context
-    my @params = $stmt->params();    # Array context
-    my($p1, $p2) = ($stmt->params(0), $stmt->params(1));
-
-The C<params> method returns information about the input parameters
-used in a statement. For example, consider the following:
-
-    INSERT INTO foo VALUES (?, ?)
-
-This would return two instances of SQL::Statement::Param. Param objects
-implement a single method, C<$param->num()>, which retrieves the
-parameter number. (0 and 1, in the above example). As of now, not very
-usefull ... :-)
-
-=item row_values
-
-    my $rowValueNum = $stmt->row_values(); # Scalar context
-    my @rowValues = $stmt->row_values();   # Array context
-    my($rval1, $rval2) = ($stmt->row_values(0),
-                          $stmt->row_values(1));
-
-This method is used for statements like
-
-    UPDATE $table SET $col1 = $val1, $col2 = $val2, ...
-        $colN = $valN WHERE ...
-    INSERT INTO $table (...) VALUES ($val1, $val2, ..., $valN)
-
-to read the values $val1, $val2, ... $valN. It returns scalar values
-or SQL::Statement::Param instances.
-
-=item order
-
-    my $orderNum = $stmt->order();   # Scalar context
-    my @order = $stmt->order();      # Array context
-    my($o1, $o2) = ($stmt->order(0), $stmt->order(1));
-
-In I<SELECT> statements you can use this for looking at the ORDER
-clause. Example:
-
-    SELECT * FROM FOO ORDER BY id DESC, name
-
-In this case, C<order> could return 2 instances of SQL::Statement::Order.
-You can use the methods C<$o-E<gt>table()>, C<$o-E<gt>column()> and
-C<$o-E<gt>desc()> to examine the order object.
-
-=item limit
-
-    my $l = $stmt->limit();
-    if ($l) {
-      my $offset = $l->offset();
-      my $limit = $l->limit();
-    }
-
-In a SELECT statement you can use a C<LIMIT> clause to implement
-cursoring:
-
-    SELECT * FROM FOO LIMIT 5
-    SELECT * FROM FOO LIMIT 5, 5
-    SELECT * FROM FOO LIMIT 10, 5
-
-These three statements would retrieve the rows 0..4, 5..9, 10..14
-of the table FOO, respectively. If no C<LIMIT> clause is used, then
-the method C<$stmt-E<gt>limit> returns undef. Otherwise it returns
-an instance of SQL::Statement::Limit. This object has the methods
-C<offset> and C<limit> to retrieve the index of the first row and
-the maximum number of rows, respectively.
-
-=item where
-
-    my $where = $stmt->where();
-
-This method is used to examine the syntax tree of the C<WHERE> clause.
-It returns undef (if no WHERE clause was used) or an instance of
-SQL::Statement::Op. The Op instance offers 4 methods:
-
-=over 12
-
-=item op
-
-returns the operator, one of C<AND>, C<OR>, C<=>, C<E<lt>E<gt>>, C<E<gt>=>,
-C<E<gt>>, C<E<lt>=>, C<E<lt>>, C<LIKE>, C<CLIKE> or C<IS>.
-
-=item arg1
-
-=item arg2
-
-returns the left-hand and right-hand sides of the operator. This can be a
-scalar value, an SQL::Statement::Param object or yet another
-SQL::Statement::Op instance.
-
-=item neg
-
-returns a TRUE value, if the operation result must be negated after
-evalution.
-
-=back
-
-To evaluate the I<WHERE> clause, fetch the topmost Op instance with
-the C<where> method. Then evaluate the left-hand and right-hand side
-of the operation, perhaps recursively. Once that is done, apply the
-operator and finally negate the result, if required.
-
-=back
-
-To illustrate the above, consider the following WHERE clause:
-
-    WHERE NOT (id > 2 AND name = 'joe') OR name IS NULL
-
-We can represent this clause by the following tree:
-
-              (id > 2)   (name = 'joe')
-                     \   /
-          NOT         AND
-                         \      (name IS NULL)
-                          \    /
-                            OR
-
-Thus the WHERE clause would return an SQL::Statement::Op instance with
-the op() field set to 'OR'. The arg2() field would return another
-SQL::Statement::Op instance with arg1() being the SQL::Statement::Column
-instance representing id, the arg2() field containing the value undef
-(NULL) and the op() field being 'IS'.
-
-The arg1() field of the topmost Op instance would return an Op instance
-with op() eq 'AND' and neg() returning TRUE. The arg1() and arg2()
-fields would be Op's representing "id > 2" and "name = 'joe'".
-
-Of course there's a ready-for-use method for WHERE clause evaluation:
-
-
-=head2 Evaluating a WHERE clause
-
-The WHERE clause evaluation depends on an object being used for
-fetching parameter and column values. Usually this can be an
-SQL::Eval object, but in fact it can be any object that supplies
-the methods
-
-    $val = $eval->param($paramNum);
-    $val = $eval->column($table, $column);
-
-See L<SQL::Eval> for a detailed description of these methods.
-Once you have such an object, you can call a
-
-    $match = $stmt->eval_where($eval);
-
-
-=head2 Evaluating queries
-
-So far all methods have been concrete. However, the interface for
-executing and evaluating queries is abstract. That means, for using
-them you have to derive a subclass from SQL::Statement that implements
-at least certain missing methods and/or overwrites others. See the
-C<test.pl> script for an example subclass.
-
-Something that all methods have in common is that they simply throw
-a Perl exception in case of errors.
-
-
-=over 8
-
-=item execute
-
-After creating a statement, you must execute it by calling the C<execute>
-method. Usually you put an eval statement around this call:
-
-    $@ = '';
-    my $rows = eval { $self->execute($data); };
-    if ($@) { die "An error occurred!"; }
-
-In case of success the method returns the number of affected rows or -1,
-if unknown. Additionally it sets the attributes
-
-    $self->{'NUM_OF_FIELDS'}
-    $self->{'NUM_OF_ROWS'}
-    $self->{'data'}
-
-the latter being an array ref of result rows. The argument $data is for
-private use by concrete subclasses and will be passed through to all
-methods. (It is intentionally not implemented as attribute: Otherwise
-we might well become self referencing data structures which could
-prevent garbage collection.)
-
-
-=item CREATE
-
-=item DROP
-
-=item INSERT
-
-=item UPDATE
-
-=item DELETE
-
-=item SELECT
-
-Called by C<execute> for doing the real work. Usually they create an
-SQL::Eval object by calling C<$self-E<gt>open_tables()>, call
-C<$self-E<gt>verify_columns()> and then do their job. Finally they return
-the triple
-
-    ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
-     $self->{'data'})
-
-so that execute can setup these attributes. Example:
-
-    ($self->{'NUM_OF_ROWS'}, $self->{'NUM_OF_FIELDS'},
-     $self->{'data'}) = $self->SELECT($data);
-
-
-=item verify_columns
-
-Called for verifying the row names that are used in the statement.
-Example:
-
-    $self->verify_columns($eval, $data);
-
-
-=item open_tables
-
-Called for creating an SQL::Eval object. In fact what it returns
-doesn't need to be derived from SQL::Eval, it's completely sufficient
-to implement the same interface of methods. See L<SQL::Eval> for
-details. The arguments C<$data>, C<$createMode> and C<$lockMode>
-are corresponding to those of SQL::Eval::Table::open_table and
-usually passed through. Example:
-
-    my $eval = $self->open_tables($data, $createMode, $lockMode);
-
-The eval object can be used for calling C<$self->verify_columns> or
-C<$self->eval_where>.
-
-=item open_table
-
-This method is completely abstract and *must* be implemented by subclasses.
-The default implementation of C<$self->open_tables> calls this method for
-any table used by the statement. See the C<test.pl> script for an example
-of imlplementing a subclass.
-
-=back
-
-
-=head1 SQL syntax
-
-The SQL::Statement module is far away from ANSI SQL or something similar,
-it is designed for implementing the DBD::CSV module. See L<DBD::CSV(3)>.
-
-I do not want to give a formal grammar here, more an informal
-description: Read the statement definition in sql_yacc.y, if you need
-something precise.
-
-The main lexical elements of the grammar are:
-
-=over 8
-
-=item Integers
-
-=item Reals
-
-Syntax obvious
-
-=item Strings
-
-Surrounded by either single or double quotes; some characters need to
-be escaped with a backslash, in particular the backslash itself (\\),
-the NUL byte (\0), Line feeds (\n), Carriage return (\r), and the
-quotes (\' or \").
-
-=item Parameters
-
-Parameters represent scalar values, like Integers, Reals and Strings
-do. However, their values are read inside Execute() and not inside
-Prepare(). Parameters are represented by question marks (?).
-
-=item Identifiers
-
-Identifiers are table or column names. Syntactically they consist of
-alphabetic characters, followed by an arbitrary number of alphanumeric
-characters. Identifiers like SELECT, INSERT, INTO, ORDER, BY, WHERE,
-... are forbidden and reserved for other tokens.
-
-=back
-
-What it offers is the following:
-
-=head2 CREATE
-
-This is the CREATE TABLE command:
-
-    CREATE TABLE $table ( $col1 $type1, ..., $colN $typeN,
-                          [ PRIMARY KEY ($col1, ... $colM) ] )
-
-The column names are $col1, ... $colN. The column types can be
-C<INTEGER>, C<CHAR(n)>, C<VARCHAR(n)>, C<REAL> or C<BLOB>. These
-types are currently completely ignored. So is the (optional)
-C<PRIMARY KEY> clause.
-
-=head2 DROP
-
-Very simple:
-
-    DROP TABLE $table
-
-=head2 INSERT
-
-This can be
-
-    INSERT INTO $table [ ( $col1, ..., $colN ) ]
-        VALUES ( $val1, ... $valN )
-
-=head2 DELETE
-
-    DELETE FROM $table [ WHERE $where_clause ]
-
-See L<SELECT> below for a decsription of $where_clause
-
-=head2 UPDATE
-
-    UPDATE $table SET $col1 = $val1, ... $colN = $valN
-        [ WHERE $where_clause ]
-
-See L<SELECT> below for a decsription of $where_clause
-
-=head2 SELECT
-
-    SELECT [DISTINCT] $col1, ... $colN FROM $table
-        [ WHERE $where_clause ] [ ORDER BY $ocol1, ... $ocolM ]
-
-The $where_clause is based on boolean expressions of the form
-$val1 $op $val2, with $op being one of '=', '<>', '>', '<', '>=',
-'<=', 'LIKE', 'CLIKE' or IS. You may use OR, AND and brackets to combine
-such boolean expressions or NOT to negate them.
-
+There are three main uses for SQL::Statement. One or another (hopefully not all) may be irrelevant for your needs: 1) to access and manipulate data in CSV, XML, and other formats 2) to build your own DBD for a new data source 3) to parse and examine the structure of SQL statements.
 
 =head1 INSTALLATION
 
-For the moment, just unpack the tarball in a private directory.  For the moment, I suggest this be somewhere other than where you store your current SQL::Statement and you use this version by a "use lib" referencing the private directory where you unpack it.
+There are no prerequisites for using this as a standalone parser.  If you want to access persistant stored data, you either need to write a subclass or use one of the DBI DBD drivers.  You can install this module using CPAN.pm, CPANPLUS.pm, PPM, apt-get, or other packaging tools.  Or you can download the tar.gz file form CPAN and use the standard perl mantra
 
-There's no Makefile at this time.
+ perl Makefile.PL
+ make
+ make test
+ make install
 
+It works fine on all platforms it's been tested on.  On Windows, you can use ppm or with the mantra use nmake, dmake, or make depending on which is available.
 
-=head1 INTERNALS
+=head1 USAGE
 
-Internally the module is splitted into three parts:
+=head2 How can I use SQL::Statement to access and modify data?
 
+SQL::Statement provides the SQL engine for a number of existing DBI drivers including L<DBD::CSV>, L<DBD::DBM>, L<DBD::AnyData>, L<DBD::Excel>, L<DBD::Amazon>, and others.
 
-=head2 Perl-independent C part
+These modules provide access to Comma Separated Values, Fixed Length, XML, HTML and many other kinds of text files, to Excel Spreadsheets, to BerkeleyDB and other DBM formats, and to non-traditional data sources like on-the-fly Amazon searches.
 
-This part, contained in the files C<sql_yacc.y>, C<sql_data.h>,
-C<sql_data.c> and C<sql_op.c>, is completely independent from Perl.
-It might well be used from within another script language, Tcl say,
-or from a true C application.
+If your interest is in actually accessing and manipulating persistent data, you don't really want to use SQL::Statement directly.  Instead, use L<DBI> along with one of the DBDs mentioned above.  You'll be using SQL::Statement, but under the hood of the DBD.   See L<http://dbi.perl.org> for help with DBI and see L<SQL::Statement::Syntax> for a description of the SQL syntax that SQL::Statement provides for these modules and see the documentation for whichever DBD you are using for additional details.
 
-You probably ask, why Perl independence? Well, first of all, I
-think this is a valuable target in itself. But the main reason was
-the impossibility to use the Perl headers inside bison generated
-code. The Perl headers export almost the complete Yacc interface
-to XS, for whatever reason, thus redefining constants and structures
-created by your own bison code. :-(
+=head2 How can I use it to parse and examine the structure of SQL statements?
 
+SQL::Statement can be used stand-alone (without a subclass, without DBI) to parse and examine the structure of SQL statements.  See L<SQL::Statement::Structure> for details.
 
-=head2 Perl-dependent C part
+=head2 How can I use it to embed a SQL engine in a DBD or other module?
 
-This is contained in C<Statement.xs>. The both C parts communicate via
-a C structure sql_stmt_t. In fact, an SQL::Statement object is nothing
-else than a pointer to such a structure. The XS calls columns(), Table(),
-where(), ... do nothing more than fetching data from this structure
-and converting it to Perl objects. See L<The sql_stmt_t structure>
-below for details on the structure.
+SQL::Statement is designed to be easily embedded in other modules and is especially suited for developing new DBI drivers (DBDs).  See L<SQL::Statement::Embed>.
 
+=head2 What SQL Syntax is supported?
 
-=head2 Perl part
+SQL::Statement supports a small but powerful subset of SQL commands. See L<SQL::Statement::Syntax>.
 
-Besides some stub functions for retrieving statement data, this is
-mainly the query processing with the exception of WHERE clause
-evaluation.
+=head2 How can I extend the supported SQL syntax?
 
+You can modify and extend the SQL syntax either by issuing SQL commands or by subclassing SQL::Statement.  See L<SQL::Statement::Syntax>.
 
-=head2 The sql_stmt_t structure
+=head1 How can I participate in ongoing development?
 
-This structure is designed for optimal performance. A typical query
-will be parsed with only 4 or 5 malloc() calls; in particular no
-memory will be aquired for storing strings; only pointers into the
-query string are used.
+SQL::Statement is a large module with many potential future directions.  You are invited to help plan, code, test, document, or kibbitz about these directions.  A sourceforge site will be available soon.  If you want to join the development team, or just hear more about the development, write Jeff a note (<jzuckerATcpan.org>.
 
-The statement stores its tokens in the values array. The array elements
-are of type sql_val_t, a union, that can represent the most interesting
-tokens; for example integers and reals are stored in the data.i and
-data.d parts of the union, strings are stored in the data.str part,
-columns in the data.col part and so on. Arrays are allocated in chunks
-of 64 elements, thus a single malloc() will be usually sufficient for
-allocating the complete array. Some types use pointers into the values
-array: For example, operations are stored in an sql_op_t structure that
-containes elements arg1 and arg2 which are pointers into the value
-table, pointing to other operations or scalars. These pointers are
-stored as indices, so that the array can be extended using realloc().
+=head1 Where can I go for more help?
 
-The sql_stmt_t structure contains other arrays: columns, tables,
-rowvals, order, ... representing the data returned by the columns(),
-tables(), row_values() and order() methods. All of these contain
-pointers into the values array, again stored as integers.
+For questions about installation or usage, please ask on the dbi-users@perl.org mailing list or post a question on PerlMonks (L<http://www.perlmonks.org/>, where Jeff is known as jZed).  If you have a bug report, a patch, a suggestion, write Jeff at the email shown below.
 
-Arrays are initialized with the _InitArray call in SQL_Statement_Prepare
-and deallocated with _DestroyArray in SQL_Statement_Destroy. Array
-elements are obtained by calling _AllocData, which returns an index.
-The number -1 is used for errors or as a NULL value.
+=head1 ACKNOWLEDGEMENTS
 
+Jochen Wiedmann created the original module as an XS (C) extension in 1998. Jeff Zucker took over the maintenance in 2001 and rewrote all of the C portions in perl and began extending the SQL support.  More recently Ilya Sterin provided help with SQL::Parser, Tim Bunce provided both general and specific support, Dan Wright and Dean Arnold have contributed extensively to the code, and dozens of people from around the world have submitted patches, bug reports, and suggestions.  Thanks to all!
 
-=head2 The WHERE clause evaluation
-
-A WHERE clause is evaluated by calling SQL_Statement_EvalWhere(). This
-function is in the Perl independent part, but it needs the possibility
-to retrieve data from the Perl part, for example column or parameter
-values. These values are retrieved via callbacks, stored in the
-sql_eval_t structure. The field stmt->evalData points to such a
-structure. Of course the calling method can extend the sql_eval_t
-structure (like eval_where in Statement.xs does) to include private data
-not used by SQL_Statement_EvalWhere.
-
-
-=head2 Features
-
-Different parsers are implemented via the sql_parser_t structure. This
-is mainly a set of yes/no flags. If you'd like to add features, do
-the following:
-
-First of all, extend the sql_parser_t structure. If your feature is
-part of a certain statement, place it into the statements section,
-for example "select.join". Otherwise choose a section like "misc"
-or "general". (There's no particular for the section design, but
-structure never hurts.)
-
-Second, add your feature to sql_yacc.y. If your feature needs to
-extend the lexer, do it like this:
-
-    if (FEATURE(misc, myfeature) {
-        /*  Scan your new symbols  */
-        ...
-    }
-
-See the I<BOOL> symbol as an example.
-
-If you need to extend the parser, do it like this:
-
-    my_new_rule:
-        /*  NULL, old behaviour, doesn't use my feature  */
-        | my_feature
-            { YFEATURE(misc, myfeature); }
-    ;
-
-Thus all parsers not having FEATURE(misc, myfeature) set will produce
-a parse error here. Again, see the BOOL symbol for an example.
-
-Third thing is to extend the builtin parsers. If they support your
-feature, add a 1, otherwise a 0. Currently there are two builtin
-parsers: The I<ansiParser> in sql_yacc.y and the sqlEvalParser in
-Statement.xs.
-
-Finally add support for your feature to the C<feature> method in
-Statement.xs. That's it!
-
-
-=head1 MULTITHREADING
-
-The complete module code is reentrant. In particular the parser is
-created with C<%pure_parser>. See L<bison(1)> for details on
-reentrant parsers. That means, the module is ready for multithreading,
-as long as you don't share handles between threads. Read-only handles,
-for example parsers, can even be shared.
-
-Statement handles cannot be shared among threads, at least not, if
-you don't grant serialized access. Per-thread handles are always safe.
-
+If you're interested in helping develop SQL::Statement or want to use it with your own modules, feel free to contact Jeff.
 
 =head1 AUTHOR AND COPYRIGHT
 
-The original version of this module is Copyright (C) 1998 by
+Copyright (c) 2001,2005 by Jeff Zucker: jzuckerATcpan.org
 
-    Jochen Wiedmann
-    Am Eisteich 9
-    72555 Metzingen
-    Germany
-
-    Email: joe@ispsoft.de
-    Phone: +49 7123 14887
-
-The current version is Copyright (c) 2001,2005 by
-
-    Jeff Zucker
-
-    Email: jzuckerATcpan.org
+Portions Copyright (C) 1998 by Jochen Wiedmann: jwiedATcpan.org
 
 All rights reserved.
 
 You may distribute this module under the terms of either the GNU
 General Public License or the Artistic License, as specified in
 the Perl README file.
-
-
-=head1 SEE ALSO
-
-L<DBI(3)>, L<DBD::CSV(3)>, L<DBD::AnyData>
 
 =cut

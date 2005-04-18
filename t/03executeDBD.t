@@ -1,18 +1,20 @@
 #!/usr/bin/perl -w
 $|=1;
 use strict;
-use lib  qw( ../lib );
+use lib qw' ./ ./t ';
+use SQLtest;
 use Test::More;
-eval { require DBD::File; };
+eval {
+    require DBI;
+    require DBD::File;
+};
 if ($@) {
-        plan skip_all => "No DBD::File available";
+        plan skip_all => "Requires DBI and DBD::File";
 }
 else {
-    plan tests => 16;
+    plan tests => 18;
 }
-use SQL::Statement; printf "SQL::Statement v.%s\n", $SQL::Statement::VERSION;
-use DBI;
-my $sth;
+my($sth,$str);
 my $dbh = DBI->connect('dbi:File(RaiseError=1):');
 
 ########################################
@@ -29,9 +31,10 @@ for (split /\n/,
     $sth = $dbh->prepare($_);
     ok($sth->execute($_),$sth->{f_stmt}->command);
 }
+
 $sth = $dbh->prepare("SELECT UPPER('a') AS A,phrase FROM phrase");
 $sth->execute;
-my $str = '';
+$str = '';
 while (my $r=$sth->fetch) { $str.="@$r^"; }
 ok($str eq 'A FOO^A BAR^','SELECT');
 ok(2==$dbh->selectrow_array("SELECT COUNT(*) FROM phrase"),'COUNT *');
@@ -124,5 +127,18 @@ sub external_sth {
     $xb_dbh->do("DROP TABLE xb");
     return ($str eq '1 foo^');
 }
+
+my $foo;
+sub test2 {$foo = 6;}
+open(O,'>','tmpss.sql') or die $!;
+print O "SELECT test2";
+close O;
+$dbh->do("CREATE FUNCTION test2");
+ok($dbh->do(q{CALL RUN('tmpss.sql')}),'run');
+ok(6==$foo,'call run');
+unlink 'tmpss.sql' if -e 'tmpss.sql';
+
 ok( $dbh->do("DROP TABLE phrase"), 'DROP TEMP TABLE');
+
+
 __END__

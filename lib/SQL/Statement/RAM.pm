@@ -56,7 +56,8 @@ sub truncate {
 sub push_names {
     my($self, $data, $names) = @_;
     $self->{col_names} = $names;
-    $self->{parser}->{col_names} = $names;
+    push @{$self->{org_col_names}},$_ for @$names;
+    push @{$self->{parser}->{col_names}},$_ for @$names;
     my($col_nums) = {};
     for (my $i = 0;  $i < @$names;  $i++) {
         $col_nums->{$names->[$i]} = $i;
