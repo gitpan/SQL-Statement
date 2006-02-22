@@ -31,7 +31,7 @@ BEGIN {
 
 #use locale;
 
-$VERSION = '1.14';
+$VERSION = '1.15';
 $dlm = '~';
 $arg_num=0;
 $warg_num=0;
@@ -387,10 +387,12 @@ sub DELETE ($$$) {
 sub UPDATE ($$$) {
     my($self, $data, $params) = @_;
     my $valnum = $self->{num_val_placeholders};
+    my @val_params;
     if ($valnum) {
-        my @val_params   = splice @$params, 0,$valnum;
-        @$params = (@$params,@val_params);
-#        my @where_params = $params->[$valnum+1..scalar @$params-1];
+         @val_params   = splice @$params, 0,$valnum;
+#        @$params = (@$params,@val_params);
+
+#         my @where_params = $params->[$valnum+1..scalar @$params-1];
 #        @$params = (@where_params,@val_params);
     }
     my($eval,$all_cols) = $self->open_tables($data, 0, 1);
@@ -426,10 +428,12 @@ sub UPDATE ($$$) {
                 $col = $self->columns($i);
                 $val = $self->row_values($i);
                 if (ref($val) eq 'SQL::Statement::Param') {
-                    $val = $eval->param($val->num());
+#                    $val = $eval->param($val->num());
+                    $val = shift @val_params;
                 }
                 elsif ($val->{type} eq 'placeholder') {
-                    $val = $eval->param($param_num++);
+#                    $val = $eval->param($param_num++);
+                    $val = shift @val_params;
 	        }
                 else {
      	            $val = $self->get_row_value($val,$eval,$rowhash);
@@ -1293,13 +1297,13 @@ sub process_predicate {
 
         # The old way, now replaced, called get_row_value everytime
         #
-        # my $val1 = $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
-        # my $val2 = $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
+         my $val1 = $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
+         my $val2 = $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
 
         # define types that we only need to call get_row_value on once
         # per execute
         #
-        my %is_value = map {$_=>1} qw(placeholder string number null);
+##        my %is_value = map {$_=>1} qw(placeholder string number null);
 
         # use a reuse value if defined, get_row_value() otherwise
         #
@@ -1310,22 +1314,23 @@ sub process_predicate {
         # $new_execute is set to 1 at the start of execute()
         # and set to 0 at the end of  eval_where()
         #
-        my $val1 = (!$new_execute and defined $pred->{arg1}->{reuse})
-                 ? $pred->{arg1}->{reuse}
-	         : $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
-        my $val2 = (!$new_execute and defined $pred->{arg2}->{reuse})
-                 ? $pred->{arg2}->{reuse}
-	         : $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
+
+##        my $val1 = (!$new_execute and defined $pred->{arg1}->{reuse})
+##                 ? $pred->{arg1}->{reuse}
+##	         : $self->get_row_value( $pred->{"arg1"}, $eval, $rowhash );
+##        my $val2 = (!$new_execute and defined $pred->{arg2}->{reuse})
+##                 ? $pred->{arg2}->{reuse}
+##	         : $self->get_row_value( $pred->{"arg2"}, $eval, $rowhash );
 
         # the first time we call get_row_value, we set the reuse value
         # for the argument object with its scalar value
         #
-        my $type1 = $pred->{arg1}->{type} if ref($pred->{arg1}) eq 'HASH';
-        my $type2 = $pred->{arg2}->{type} if ref($pred->{arg2}) eq 'HASH';
-	$pred->{arg1}->{reuse} = $val1
-                              if $type1 and $is_value{$type1} and $new_execute;
-	$pred->{arg2}->{reuse} = $val2
-                              if $type2 and $is_value{$type2} and $new_execute;
+##        my $type1 = $pred->{arg1}->{type} if ref($pred->{arg1}) eq 'HASH';
+##        my $type2 = $pred->{arg2}->{type} if ref($pred->{arg2}) eq 'HASH';
+##	$pred->{arg1}->{reuse} = $val1
+##                              if $type1 and $is_value{$type1} and $new_execute;
+##	$pred->{arg2}->{reuse} = $val2
+##                              if $type2 and $is_value{$type2} and $new_execute;
 
         my $op     = $pred->{op};
         my $opfunc = $op;
