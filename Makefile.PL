@@ -30,8 +30,6 @@ my %opts =
 	 'DIST_DEFAULT' => 'all tardist',
 	 'COMPRESS'     => "gzip -9vf" },
      'PREREQ_PM'    => {
-         'DBI'          => '1.00',
-         'DBD::CSV'     => '0',
          'Scalar::Util' => '1.0',
          'Params::Util' => '0.35',
      },
