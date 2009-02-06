@@ -3,9 +3,12 @@
 require 5.004;
 use strict;
 
-require SQL::Statement;
-
 package SQL::Eval;
+
+use vars qw($VERSION);
+$VERSION = '1.0';
+
+require SQL::Statement;
 
 sub new ($$)
 {

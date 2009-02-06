@@ -6,10 +6,12 @@ require ExtUtils::MakeMaker;
 eval {
   require SQL::Statement;
   if ($SQL::Statement::VERSION < 1.002) {
-    print <<END_OF_WARNING;
+    my $warning = <<END_OF_WARNING;
 
-WARNING! You seem to have an older version of SQL::Statement already installed.  This new version introduces a number of features that will impact operation of SQL::Statement and of DBD drivers for CSV, AnyData, and Excel.  Changes include:
+WARNING! You seem to have an older version of SQL::Statement already installed.
+This new version introduces a number of features that will impact operation of SQL::Statement and of DBD drivers for CSV, AnyData, and Excel.
 
+Changes include:
   1. There are *many* new SQL features including table joins
   2. BLOBS, Empty strings, and NULLs behave differently
   3. Some applications may run a bit slower than previously
@@ -17,9 +19,14 @@ WARNING! You seem to have an older version of SQL::Statement already installed. 
 See the README for details.
 
 END_OF_WARNING
-print "Press enter to continue ... ";
-my $x = <STDIN>;
-last if $x;
+    if( defined( $ENV{SQL_STATEMENT_WARN_UPDATE} ) )
+    {
+      warn $warning;
+    }
+    else
+    {
+      Carp::croak( $warning );
+    }
   }
 };
 
@@ -35,8 +42,9 @@ my %opts =
          'Clone'        => '0.30',
          'Test::Simple' => '0.86',
      },
+     LICENSE        => 'perl',
      );
 if ($ExtUtils::MakeMaker::VERSION >= 5.43) {
-    $opts{'AUTHOR'} = 'Jeff Zucker (jeff@vpservices.com)';
+    $opts{'AUTHOR'} = 'Jeff Zucker <jeff@vpservices.com>, Jens Rehsack <rehsack@web.de>';
 }
 ExtUtils::MakeMaker::WriteMakefile(%opts);
