@@ -1,5 +1,13 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.20, released March 5th, 2009
+------------------------------------------
+
+* Fixed Makefile in MANIFEST (reported by Havard Eidnes in RT #43586)
+* Fixed invalid label FETCHROW used (reported by Michael in RT #42982)
+* separated update_one_row and update_specific_row method names for tables
+  to avoid confusion
+
 Version 1.19, released February 6th, 2009
 ------------------------------------------
 
