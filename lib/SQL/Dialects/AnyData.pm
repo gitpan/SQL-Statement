@@ -1,10 +1,11 @@
 package SQL::Dialects::AnyData;
 
 use vars qw($VERSION);
-$VERSION = '1.22';
+$VERSION = '1.23';
 
-sub get_config {
-return <<EOC;
+sub get_config
+{
+    return <<EOC;
 [VALID COMMANDS]
 CREATE
 DROP
@@ -88,3 +89,42 @@ TEXT
 EOC
 }
 1;
+
+=pod
+
+=head1 NAME
+
+SQL::Dialects::AnyData
+
+=head1 SYNOPSIS
+
+  use SQL::Dialects::AnyData;
+  $config = SQL::Dialects::ANSI->get_config();
+
+=head1 DESCRIPTION
+
+This package provides the necessary configuration for AnyData SQL.
+
+=head1 FUNCTIONS
+
+=head2 get_config
+
+Returns the configuration for AnyData SQL. The configuration is delivered in
+ini-style:
+
+  [VALID COMMANDS]
+  ...
+
+  [VALID OPTIONS]
+  ...
+
+  [VALID COMPARISON OPERATORS]
+  ...
+
+  [VALID DATA TYPES]
+  ...
+
+  [RESERVED WORDS]
+  ...
+
+=cut

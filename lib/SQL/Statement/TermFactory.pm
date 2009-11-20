@@ -9,7 +9,7 @@ use Data::Dumper;
 use Params::Util qw(_HASH _ARRAY0);
 use Scalar::Util qw(blessed weaken);
 
-our $VERSION = '1.22';
+our $VERSION = '1.23';
 
 my %oplist = (
                '='       => 'Equal',
@@ -30,9 +30,8 @@ my %oplist = (
 
 sub new
 {
-    my $class = shift;
-    my $owner = shift;
-    my $self  = bless( { OWNER => $owner, }, $class );
+    my ( $class, $owner ) = @_;
+    my $self = bless( { OWNER => $owner, }, $class );
 
     weaken( $self->{OWNER} );
 
@@ -57,7 +56,20 @@ sub buildCondition
         }
         elsif ( defined( $oplist{$op} ) )
         {
-            my $cn    = 'SQL::Statement::Operation::' . $oplist{$op};
+            my $cn;
+            if (
+                 UNIVERSAL::isa(
+                                 'SQL::Statement::Operation::' . $self->{OWNER}->{dialect} . '::' . $oplist{$op},
+                                 'SQL::Statement::Operation'
+                               )
+               )
+            {
+                $cn = 'SQL::Statement::Operation::' . $self->{OWNER}->{dialect} . '::' . $oplist{$op};
+            }
+            else
+            {
+                $cn = 'SQL::Statement::Operation::' . $oplist{$op};
+            }
             my $left  = $self->buildCondition( $pred->{arg1} );
             my $right = $self->buildCondition( $pred->{arg2} );
             $term = $cn->new( $self->{OWNER}, $op, $left, $right );
@@ -169,6 +181,13 @@ the where clause or returning column data.
 The concept of a factory can be studied in I<Design Patterns> by the Gang of
 Four. The concept of using polymophism instead of conditions is suggested by
 Martin Fowler in his book I<Refactoring>.
+
+=head1 METHODS
+
+=head2 buildCondition
+
+Builds a condition object from a given (part of a) where clause. This method
+calls itself recursively for I<predicates>.
 
 =head1 AUTHOR AND COPYRIGHT
 

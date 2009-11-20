@@ -4,6 +4,7 @@ lib/SQL/Dialects/AnyData.pm
 lib/SQL/Dialects/CSV.pm
 lib/SQL/Eval.pm
 lib/SQL/Parser.pm
+lib/SQL/Parser.pm.rej
 lib/SQL/Statement.pm
 lib/SQL/Statement/Embed.pod
 lib/SQL/Statement/Function.pm
@@ -41,5 +42,8 @@ t/15naturaljoins.t
 t/16morejoins.t
 t/17quoting.t
 t/18bigjoin.t
+t/19idents.t
+t/20pod.t
+t/21pod_coverage.t
 t/SQLtest.pm
 Todo
