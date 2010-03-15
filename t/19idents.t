@@ -14,15 +14,14 @@ BEGIN
     use_ok('SQL::Parser');       # Test 2
 }
 
-diag("SQL::Statement version $SQL::Statement::VERSION");
-
 sub columns_sig
 {
     my (@columns) = @_;
 
     if ( blessed( $columns[0] ) && $columns[0]->isa('SQL::Statement') )
     {
-        unshift( @columns, @{shift(@columns)->{column_names}} ); # columns() doesn't work before open_tables succeeds
+	my $stmt = $columns[0];
+	@columns = map { $_->{name} || $_->{value} } @{$stmt->{column_defs}}; # columns() doesn't work before open_tables succeeds
     }
 
     @columns = sort( @columns );

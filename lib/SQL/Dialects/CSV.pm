@@ -1,7 +1,9 @@
 package SQL::Dialects::CSV;
 
 use vars qw($VERSION);
-$VERSION = '1.23';
+$VERSION = '1.24';
+
+use SQL::Dialects::Role;
 
 sub get_config
 {
@@ -90,7 +92,7 @@ SQL::Dialects::CSV
 =head1 SYNOPSIS
 
   use SQL::Dialects::CSV;
-  $config = SQL::Dialects::ANSI->get_config();
+  $config = SQL::Dialects::CSV->get_config();
 
 =head1 DESCRIPTION
 

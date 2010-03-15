@@ -5,7 +5,7 @@ require Carp;
 
 require SQL::Statement::Term;
 
-our $VERSION = '1.23';
+our $VERSION = '1.24';
 
 @ISA = qw(SQL::Statement::Term);
 
@@ -1017,7 +1017,7 @@ sub regexp($)
 
 =head1 AUTHOR AND COPYRIGHT
 
-Copyright (c) 2009 by Jens Rehsack: rehsackATcpan.org
+Copyright (c) 2009,2010 by Jens Rehsack: rehsackATcpan.org
 
 All rights reserved.
 

@@ -6,10 +6,10 @@ require SQL::Statement::Placeholder;
 require SQL::Statement::Function;
 
 use Data::Dumper;
-use Params::Util qw(_HASH _ARRAY0);
+use Params::Util qw(_HASH _ARRAY0 _INSTANCE);
 use Scalar::Util qw(blessed weaken);
 
-our $VERSION = '1.23';
+our $VERSION = '1.24';
 
 my %oplist = (
                '='       => 'Equal',
@@ -38,6 +38,21 @@ sub new
     return $self;
 }
 
+my %opClasses;
+
+sub _getOpClass($)
+{
+    my ( $self, $op ) = @_;
+    unless ( defined( $opClasses{$op} ) )
+    {
+        my $opBase = 'SQL::Statement::Operation';
+        my $opDialect = join( '::', $opBase, $self->{OWNER}->{dialect}, $oplist{$op} );
+        $opClasses{$op} = UNIVERSAL::isa( $opDialect, $opBase ) ? $opDialect : join( '::', $opBase, $oplist{$op} );
+    }
+
+    return $opClasses{$op};
+}
+
 sub buildCondition
 {
     my ( $self, $pred ) = @_;
@@ -56,20 +71,7 @@ sub buildCondition
         }
         elsif ( defined( $oplist{$op} ) )
         {
-            my $cn;
-            if (
-                 UNIVERSAL::isa(
-                                 'SQL::Statement::Operation::' . $self->{OWNER}->{dialect} . '::' . $oplist{$op},
-                                 'SQL::Statement::Operation'
-                               )
-               )
-            {
-                $cn = 'SQL::Statement::Operation::' . $self->{OWNER}->{dialect} . '::' . $oplist{$op};
-            }
-            else
-            {
-                $cn = 'SQL::Statement::Operation::' . $oplist{$op};
-            }
+            my $cn    = $self->_getOpClass($op);
             my $left  = $self->buildCondition( $pred->{arg1} );
             my $right = $self->buildCondition( $pred->{arg2} );
             $term = $cn->new( $self->{OWNER}, $op, $left, $right );
@@ -79,9 +81,10 @@ sub buildCondition
             my $left  = $self->buildCondition( $pred->{arg1} );
             my $right = $self->buildCondition( $pred->{arg2} );
 
-            $term = SQL::Statement::Function::UserFunc->new( $self->{OWNER}, $op,
-                                                             $self->{OWNER}->{opts}->{function_names}->{$op},
-                                                             [ $left, $right ] );
+            $term =
+              SQL::Statement::Function::UserFunc->new( $self->{OWNER}, $op,
+                                                       $self->{OWNER}->{opts}->{function_names}->{$op},
+                                                       [ $left, $right ] );
         }
         else
         {
@@ -146,6 +149,10 @@ sub buildCondition
             return $self->{OWNER}->do_err( sprintf( q{Unknown type '%s'}, $pred->{type} ) );
         }
     }
+    elsif ( defined( _INSTANCE( $pred, 'SQL::Statement::Term' ) ) )
+    {
+        return $pred;
+    }
     else
     {
         return $self->{OWNER}->do_err( sprintf( q~Unknown predicate '{%s}'~, Dumper($pred) ) );
@@ -192,7 +199,7 @@ calls itself recursively for I<predicates>.
 =head1 AUTHOR AND COPYRIGHT
 
 Copyright (c) 2001,2005 by Jeff Zucker: jzuckerATcpan.org
-Copyright (c) 2008,2009 by Jens Rehsack: rehsackATcpan.org
+Copyright (c) 2008-2010 by Jens Rehsack: rehsackATcpan.org
 
 Portions Copyright (C) 1998 by Jochen Wiedmann: jwiedATcpan.org
 

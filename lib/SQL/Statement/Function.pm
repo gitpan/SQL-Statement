@@ -3,7 +3,7 @@ package SQL::Statement::Function;
 require SQL::Statement::Term;
 @ISA = qw(SQL::Statement::Term);
 
-our $VERSION = '1.23';
+our $VERSION = '1.24';
 
 =pod
 
@@ -147,7 +147,7 @@ package SQL::Statement::Function::NumericEval;
 
 use vars qw(@ISA);
 
-use Params::Util qw(_NUMBER);
+use Params::Util qw(_NUMBER _INSTANCE);
 
 @ISA = qw(SQL::Statement::Function);
 
@@ -462,7 +462,7 @@ sub value($)
 
 =head1 AUTHOR AND COPYRIGHT
 
-Copyright (c) 2009 by Jens Rehsack: rehsackATcpan.org
+Copyright (c) 2009,2010 by Jens Rehsack: rehsackATcpan.org
 
 All rights reserved.
 
