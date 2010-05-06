@@ -21,6 +21,7 @@ require SQL::Statement::RAM;
 require SQL::Statement::TermFactory;
 require SQL::Statement::Util;
 
+use Carp qw(carp croak);
 use Clone qw(clone);
 use Scalar::Util qw(blessed looks_like_number);
 use List::Util qw(first);
@@ -28,7 +29,7 @@ use Params::Util qw(_INSTANCE _STRING _ARRAY _ARRAY0 _HASH0 _HASH);
 
 #use locale;
 
-$VERSION = '1.26';
+$VERSION = '1.27';
 
 sub new
 {
@@ -304,7 +305,7 @@ sub DELETE ($$$)
 {
     my ( $self, $data, $params ) = @_;
     my ( $eval, $all_cols ) = $self->open_tables( $data, 0, 1 );
-    return undef unless $eval;
+    return unless $eval;
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols );
     my ($table)    = $eval->table( $self->tables(0)->name() );
@@ -318,13 +319,15 @@ sub DELETE ($$$)
             if ( $self->eval_where( $eval, '', $array ) )
             {
                 ++$affected;
-                $array = $self->{fetched_value} if $self->{fetched_from_key};
+                $array = $self->{fetched_value} if ( $self->{fetched_from_key} );
                 $table->delete_one_row( $data, $array );
-                return ( $affected, 0 ) if $self->{fetched_from_key};
+                return ( $affected, 0 ) if ( $self->{fetched_from_key} );
             }
         }
+
         return ( $affected, 0 );
     }
+
     while ( $array = $table->fetch_row($data) )
     {
         if ( $self->eval_where( $eval, '', $array ) )
@@ -350,7 +353,7 @@ sub UPDATE ($$$)
     my ( $self, $data, $params ) = @_;
 
     my ( $eval, $all_cols ) = $self->open_tables( $data, 0, 1 );
-    return undef unless $eval;
+    return unless $eval;
 
     my $valnum = $self->{num_val_placeholders};
     my @val_params = splice( @{$params}, 0, $valnum ) if ($valnum);
@@ -409,18 +412,27 @@ sub UPDATE ($$$)
 
             # Martin Fabiani <martin@fabiani.net>:
             # the following block is the most important enhancement to SQL::Statement::UPDATE
-            if ( !$self->{fetched_from_key} && $table->can('update_specific_row') )
+            if ( !$self->{fetched_from_key} )
             {
-                $table->update_specific_row( $data, $array, $originalValues );
-                next;
+                if ( $table->can('update_specific_row') )
+                {
+                    $table->update_specific_row( $data, $array, $originalValues );
+                    next;
+                }
+                elsif ( $table->can('update_one_row') )
+                {
+                    $table->update_one_row( $data, $array );
+                    next;
+                }
+            }
+            else
+            {
+                $table->update_one_row( $data, $array );
+                return ( $affected, 0 );
             }
         }
-        if ( $self->{fetched_from_key} )
-        {
-            $table->update_one_row( $data, $array );
-            return ( $affected, 0 );
-        }
-        push( @rows, $array );
+
+        push( @rows, $array ) unless ( $table->can('update_one_row') || $table->can('update_specific_row') );
     }
 
     unless ( $table->can('update_one_row') || $table->can('update_specific_row') )
@@ -804,15 +816,14 @@ sub SELECT($$)
     my ( $eval, $all_cols, $tableName, $table );
     if ( defined( $self->{join} ) )
     {
-        return $self->JOIN( $data, $params )
-          if !defined $self->{join}->{table};
+        return $self->JOIN( $data, $params ) if ( !defined $self->{join}->{table} );
         $tableName = $self->{dlm} . 'tmp';
         $table     = $self->{join}->{table};
     }
     else
     {
         ( $eval, $all_cols ) = $self->open_tables( $data, 0, 0 );
-        return undef unless $eval;
+        return unless $eval;
         $eval->params($params);
         $self->verify_columns( $data, $eval, $all_cols );
         $tableName = $self->tables(0)->name();
@@ -964,7 +975,10 @@ sub SELECT($$)
     if ( $self->distinct() )
     {
         my %seen;
-        @{$rows} = map { $seen{ join( "\0", ( map { defined($_) ? $_ : '' } @{$_} ) ) }++ ? () : $_ } @{$rows};
+        @{$rows} = map
+        {
+            $seen{ join( "\0", ( map { defined($_) ? $_ : '' } @{$_} ) ) }++ ? () : $_
+        } @{$rows};
     }
 
     if ( $self->{has_set_functions} )
@@ -1254,9 +1268,15 @@ sub getColumnObject($)
             else
             {
                 # FIXME add '\0' constants between items?
-		my $colSep = $self->{termFactory}->buildCondition( { type => 'string', value => "\0", } );
+                my $colSep =
+                  $self->{termFactory}->buildCondition(
+                                                        {
+                                                          type  => 'string',
+                                                          value => "\0",
+                                                        }
+                                                      );
                 @cols = map { $_->[2], $colSep } @cols;
-		pop(@cols);
+                pop(@cols);
                 $col = $self->{termFactory}->buildCondition(
                                                              {
                                                                type  => 'function',
@@ -1760,8 +1780,8 @@ sub do_err
     $err = "\nExecution ERROR: $err$prog.\n\n";
 
     $self->{errstr} = $err;
-    warn $err  if $self->{PrintError};
-    die "$err" if $self->{RaiseError};
+    carp $err if $self->{PrintError};
+    croak "$err" if $self->{RaiseError};
     return;
 }
 
@@ -1984,18 +2004,18 @@ sub calc()
 
     $self->do_calc();
 
-    if( scalar( keys( %{ $self->{final_rows} } ) ) )
+    if ( scalar( keys( %{ $self->{final_rows} } ) ) )
     {
-	foreach my $key ( keys( %{ $self->{final_rows} } ) )
-	{
-	    my $final_row = $self->build_row( $self->{final_rows}->{$key} );
-	    push( @final_table, $final_row );
-	}
+        foreach my $key ( keys( %{ $self->{final_rows} } ) )
+        {
+            my $final_row = $self->build_row( $self->{final_rows}->{$key} );
+            push( @final_table, $final_row );
+        }
     }
     else
     {
-	my $final_row = $self->build_row( {} );
-	push( @final_table, $final_row );
+        my $final_row = $self->build_row( {} );
+        push( @final_table, $final_row );
     }
 
     return \@final_table;
@@ -2139,7 +2159,7 @@ and other features.
 
 SQL::Statement is a small embeddable Database Management System (DBMS), this
 means that it provides all of the services of a simple DBMS except that
-instead of a persistant storage mechanism, it has two things: 1) an in-memory
+instead of a persistent storage mechanism, it has two things: 1) an in-memory
 storage mechanism that allows you to prepare, execute, and fetch from SQL
 statements using temporary tables and 2) a set of software sockets where
 any author can plug in any storage mechanism.
@@ -2152,7 +2172,7 @@ CSV, XML, and other formats 2) to build your own DBD for a new data source
 =head1 INSTALLATION
 
 There are no prerequisites for using this as a standalone parser. If you want
-to access persistant stored data, you either need to write a subclass or use
+to access persistent stored data, you either need to write a subclass or use
 one of the DBI DBD drivers.  You can install this module using CPAN.pm,
 CPANPLUS.pm, PPM, apt-get, or other packaging tools.  Or you can download the
 tar.gz file form CPAN and use the standard perl mantra:
@@ -2313,7 +2333,7 @@ Bugs and feature requests are accepted against latest version
 only. To get patches for earlier versions, you need to get an
 agreement with a developer of your choice - who might or might
 not report the issue and a suggested fix upstream (depends on
-the license you've choosen).
+the license you've chosen).
 
 =head2 Business support and maintenance
 
