@@ -23,13 +23,14 @@ require SQL::Statement::Util;
 
 use Carp qw(carp croak);
 use Clone qw(clone);
+use Errno;
 use Scalar::Util qw(blessed looks_like_number);
 use List::Util qw(first);
 use Params::Util qw(_INSTANCE _STRING _ARRAY _ARRAY0 _HASH0 _HASH);
 
 #use locale;
 
-$VERSION = '1.27';
+$VERSION = '1.27_01';
 
 sub new
 {
@@ -64,7 +65,8 @@ sub new
 
         $parser = SQL::Parser->new( $parser_dialect, $flags );
     }
-    $self->{termFactory} = SQL::Statement::TermFactory->new($self);
+    $self->{termFactory}  = SQL::Statement::TermFactory->new($self);
+    $self->{capabilities} = {};
     $self->prepare( $sql, $parser );
     return $self;
 }
@@ -171,7 +173,7 @@ sub CREATE ($$$)
         }
         $names = $sth->{NAME} unless defined $names;
         my $tbl_data = $sth->{f_stmt}->{data};
-        my $tbl_name = $self->tables(0)->name;
+        my $tbl_name = $self->{org_table_names}->[0] || $self->tables(0)->name;
 
         # my @tbl_cols = map {$_->name} $sth->{f_stmt}->columns;
         #my @tbl_cols=map{$_->name} $sth->{f_stmt}->columns if $sth->{f_stmt};
@@ -186,7 +188,8 @@ sub CREATE ($$$)
         $data->{Database}->do($create_sql);
         my $colstr     = ('?,') x @tbl_cols;
         my $insert_sql = "INSERT INTO $tbl_name VALUES($colstr)";
-        $data->{Database}->do( $insert_sql, {}, @$_ ) for @$tbl_data;
+        my $local_sth  = $data->{Database}->prepare($insert_sql);
+        $local_sth->execute(@$_) for @$tbl_data;
         return ( 0, 0 );
     }
     my ( $eval, $foo ) = $self->open_tables( $data, 1, 1 );
@@ -217,18 +220,25 @@ sub CALL
     ( $self->{NUM_OF_ROWS}, $self->{NUM_OF_FIELDS}, $self->{data} ) = $procTerm->value($data);
 }
 
+my $enoentstr = "Cannot open .*\(" . Errno::ENOENT . "\)";
+my $enoentrx  = qr/$enoentstr/;
+
 sub DROP ($$$)
 {
     my ( $self, $data, $params ) = @_;
-    if ( $self->{ignore_missing_table} )
+    my $eval;
+    my @err;
+    eval {
+        local $SIG{__WARN__} = sub { push @err, @_ };
+        ($eval) = $self->open_tables( $data, 0, 1 );
+    };
+    if ( $self->{ignore_missing_table} and ( $@ or @err ) and grep { $_ =~ $enoentrx } ( @err, $@ ) )
     {
-        eval { $self->open_tables( $data, 0, 0 ) };
-        if ( $@ and $@ =~ m/no such (table|file)/i )
-        {
-            return ( -1, 0 );
-        }
+        $@ = '';
+        return ( -1, 0 );
     }
-    my ($eval) = $self->open_tables( $data, 0, 1 );
+
+    $self->do_err( $@ || $err[0] ) if ( $@ || @err );
 
     #    return undef unless $eval;
     return ( -1, 0 ) unless $eval;
@@ -250,9 +260,10 @@ sub INSERT ($$$)
 
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols ) if ( scalar( $self->columns() ) );
+    return if ( $self->{errstr} );
 
     my ($table) = $eval->table( $self->tables(0)->name() );
-    $table->seek( $data, 0, 2 );
+    $table->seek( $data, 0, 2 ) unless ( $table->capability('insert_new_row') );
 
     my ( $val, $col, $i, $k );
     my ($cNum) = scalar( $self->columns() );
@@ -291,7 +302,9 @@ sub INSERT ($$$)
                 }
                 $array->[ $table->column_num( $col->name() ) ] = $val;
             }
-            $table->push_row( $data, $array );
+            $table->capability('insert_new_row')
+              ? $table->insert_new_row( $data, $array )
+              : $table->push_row( $data, $array );
         }
     }
     else
@@ -308,44 +321,61 @@ sub DELETE ($$$)
     return unless $eval;
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols );
-    my ($table)    = $eval->table( $self->tables(0)->name() );
+    return if ( $self->{errstr} );
+    my $tname      = $self->tables(0)->name();
+    my ($table)    = $eval->table($tname);
     my ($affected) = 0;
     my ( @rows, $array );
 
-    if ( $table->can('delete_one_row') )
-    {
-        while ( my $array = $table->fetch_row($data) )
-        {
-            if ( $self->eval_where( $eval, '', $array ) )
-            {
-                ++$affected;
-                $array = $self->{fetched_value} if ( $self->{fetched_from_key} );
-                $table->delete_one_row( $data, $array );
-                return ( $affected, 0 ) if ( $self->{fetched_from_key} );
-            }
-        }
-
-        return ( $affected, 0 );
-    }
-
     while ( $array = $table->fetch_row($data) )
     {
-        if ( $self->eval_where( $eval, '', $array ) )
+        if ( $self->eval_where( $eval, $tname, $array ) )
         {
             ++$affected;
+            if ( $table->capability('rowwise_delete') and $table->capability('inplace_delete') )
+            {
+                if ( $table->capability('delete_one_row') )
+                {
+                    $table->delete_one_row( $data, $array );
+                }
+                elsif ( $table->capability('delete_current_row') )
+                {
+                    $table->delete_current_row( $data, $array );
+                }
+            }
+            elsif ( $table->capability('rowwise_delete') )
+            {
+                push( @rows, $array );
+            }
+
+            next;
+        }
+
+        push( @rows, $array ) unless ( $table->capability('rowwise_delete') );
+    }
+
+    if (@rows)
+    {
+        if ( $table->capability('rowwise_delete') )    # @rows is empty in case of inplace_delete capability
+        {
+            foreach my $array (@rows)
+            {
+                $table->delete_one_row( $data, $array );
+            }
         }
         else
         {
-            push( @rows, $array );
+            # rewrite table without deleted elements
+            $table->seek( $data, 0, 0 );
+            foreach my $array (@rows)
+            {
+                $table->push_row( $data, $array );
+            }
+            $table->truncate($data);
         }
     }
-    $table->seek( $data, 0, 0 );
-    foreach $array (@rows)
-    {
-        $table->push_row( $data, $array );
-    }
-    $table->truncate($data);
-    ( $affected, 0 );
+
+    return ( $affected, 0 );
 }
 
 sub UPDATE ($$$)
@@ -360,6 +390,7 @@ sub UPDATE ($$$)
     $self->{params} ||= $params;
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols );
+    return if ( $self->{errstr} );
 
     my $tname      = $self->tables(0)->name();
     my ($table)    = $eval->table($tname);
@@ -368,20 +399,17 @@ sub UPDATE ($$$)
 
     while ( my $array = $table->fetch_row($data) )
     {
+        my $originalValues;
         if ( $self->eval_where( $eval, $tname, $array ) )
         {
             my $valpos = 0;
-            my $originalValues;
-            if ( not( $self->{fetched_from_key} )
-                 and $table->can('update_specific_row') )
+            if ( $table->capability('update_specific_row') )
             {
                 $originalValues = clone($array);
-                $array          = $self->{fetched_value};
             }
 
             for ( my $i = 0; $i < $self->columns(); $i++ )
             {
-                my $col = $self->columns($i);
                 my $val = $self->row_values( 0, $i );
                 if ( defined( _INSTANCE( $val, 'SQL::Statement::Param' ) ) )
                 {
@@ -405,44 +433,65 @@ sub UPDATE ($$$)
                     return $self->do_err('Internal error: Unexpected column type');
                 }
 
+                my $col = $self->columns($i);
                 $array->[ $table->column_num( $col->name() ) ] = $val;
             }
 
             ++$affected;
-
-            # Martin Fabiani <martin@fabiani.net>:
-            # the following block is the most important enhancement to SQL::Statement::UPDATE
-            if ( !$self->{fetched_from_key} )
+            if ( $table->capability('rowwise_update') and $table->capability('inplace_update') )
             {
-                if ( $table->can('update_specific_row') )
+                # Martin Fabiani <martin@fabiani.net>:
+                # the following block is the most important enhancement to SQL::Statement::UPDATE
+                if ( $table->capability('update_specific_row') )
                 {
                     $table->update_specific_row( $data, $array, $originalValues );
-                    next;
                 }
-                elsif ( $table->can('update_one_row') )
+                elsif ( $table->capability('update_one_row') )
                 {
+                    # NOTE: this prevents from updating index keys
                     $table->update_one_row( $data, $array );
-                    next;
+                }
+                elsif ( $table->capability('update_current_row') )
+                {
+                    $table->update_current_row( $data, $array );
                 }
             }
-            else
+            elsif ( $table->capability('rowwise_update') )
             {
-                $table->update_one_row( $data, $array );
-                return ( $affected, 0 );
+                push( @rows, $array ) unless ( $table->capability('update_specific_row') );
+                push( @rows, [ $array, $originalValues ] ) if ( $table->capability('update_specific_row') );
             }
         }
 
-        push( @rows, $array ) unless ( $table->can('update_one_row') || $table->can('update_specific_row') );
+        push( @rows, $array ) unless ( $table->capability('rowwise_update') );
     }
 
-    unless ( $table->can('update_one_row') || $table->can('update_specific_row') )
+    if (@rows)
     {
-        $table->seek( $data, 0, 0 );
-        foreach my $array (@rows)
+        if ( $table->capability('rowwise_update') )    # @rows is empty in case of inplace_update capability
         {
-            $table->push_row( $data, $array );
+            foreach my $array (@rows)
+            {
+                if ( $table->capability('update_specific_row') )
+                {
+                    $table->update_specific_row( $data, $array->[0], $array->[1] );
+                }
+                elsif ( $table->capability('update_one_row') )
+                {
+                    $table->update_one_row( $data, $array );
+                }
+            }
         }
-        $table->truncate($data);
+        else
+        {
+            # rewrite table with updated elements
+            $table->seek( $data, 0, 0 );
+            foreach my $array (@rows)
+            {
+                $table->push_row( $data, $array );
+            }
+            $table->truncate($data);
+        }
     }
 
     return ( $affected, 0 );
@@ -541,6 +590,7 @@ sub JOIN
     return undef unless $eval;
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols );
+    return if ( $self->{errstr} );
     if (     $self->{join}->{keycols}
          and $self->{join}->{table_order}
          and ( scalar( @{ $self->{join}->{table_order} } ) == 0 ) )
@@ -826,6 +876,7 @@ sub SELECT($$)
         return unless $eval;
         $eval->params($params);
         $self->verify_columns( $data, $eval, $all_cols );
+        return if ( $self->{errstr} );
         $tableName = $self->tables(0)->name();
         $table     = $eval->table($tableName);
     }
@@ -956,16 +1007,13 @@ sub SELECT($$)
         {
             next if ( defined($limit_count) and ( $row_count++ < $offset ) );
             $limit_count++ if ( defined($limit_count) );
-            $array = $self->{fetched_value} if ( $self->{fetched_from_key} );
 
             my @row = map { $_->value($e) } $self->columns();
             push( @{$rows}, \@row );
 
-            # We quit here if its a primary key search
-            # or if there's a limit clause without order clause
+            # We quit here if there's a limit clause without order clause
             # and the limit has been reached
-            #
-            if ( $self->{fetched_from_key} || ( defined($limit_count) && ( $limit_count >= $self->limit() ) ) )
+            if ( defined($limit_count) && ( $limit_count >= $self->limit() ) )
             {
                 return ( scalar( @{$rows} ), $numFields, $rows );
             }
@@ -975,9 +1023,10 @@ sub SELECT($$)
     if ( $self->distinct() )
     {
         my %seen;
-        @{$rows} = map
-        {
-            $seen{ join( "\0", ( map { defined($_) ? $_ : '' } @{$_} ) ) }++ ? () : $_
+        @{$rows} = map {
+            $seen{ join( "\0", ( map { defined($_) ? $_ : '' } @{$_} ) ) }++
+              ? ()
+              : $_
         } @{$rows};
     }
 
@@ -1078,6 +1127,8 @@ sub fetch
     return $row;
 }
 
+sub open_table ($$$$$) { croak "Abstract method " . ref( $_[0] ) . "::open_table called" }
+
 sub open_tables
 {
     my ( $self, $data, $createMode, $lockMode ) = @_;
@@ -1110,12 +1161,13 @@ sub open_tables
         elsif ( $data->{Database}->{sql_ram_tables}->{$name} )
         {
             $t->{$name} = $data->{Database}->{sql_ram_tables}->{$name};
-            $t->{$name}->{index} = 0;
+            $t->{$name}->seek( $data, 0, 0 );
             $t->{$name}->init_table( $data, $name, $createMode, $lockMode ) if ( $t->{$name}->can('init_table') );
         }
-        elsif ( $self->{is_ram_table} or !( $self->can('open_table') ) )
+        elsif ( $self->{is_ram_table} )
         {
-            $t->{$name} = $data->{Database}->{sql_ram_tables}->{$name} = SQL::Statement::RAM->new( $name, [], [] );
+            $t->{$name} = $data->{Database}->{sql_ram_tables}->{$name} =
+              SQL::Statement::RAM::Table->new( $name, [], [] );
         }
         else
         {
@@ -1367,20 +1419,24 @@ sub verify_expand_column
 {
     my ( $self, $c, $i, $usr_cols, $is_duplicate, $col_exists ) = @_;
 
-    my ( $table, $col );
+    my ( $table, $col, $col_obj );
     if ( $c =~ m/(\S+)\.(\S+)/ )
     {
         $table = $1;
         $col   = $2;
     }
-    else
+    elsif ( ++${$i} >= 0 )
     {
-        ++${$i};
-        ( $table, $col ) = ( $usr_cols->[ ${$i} ]->{table}, $usr_cols->[ ${$i} ]->{name} ) if ( ${$i} >= 0 );
+        $col_obj = $usr_cols->[ ${$i} ];
+        ( $table, $col ) = ( $col_obj->{table}, $col_obj->{name} );
     }
     return unless ($col);
 
-    unless ( defined($table) )
+    my $is_column =
+      ( defined( _INSTANCE( $col_obj, 'SQL::Statement::Util::Column' ) )
+        and ( $col_obj->{coldef}->{type} eq 'column' ) ) ? 1 : 0;
+
+    unless ( $is_column and defined($table) )
     {
         ( $table, undef ) = $self->full_qualified_column_name($col);
     }
@@ -1390,23 +1446,22 @@ sub verify_expand_column
         $table = $table->name();
     }
 
-    my $col_obj = $self->{computed_column}->{$c};
-    if ( !$table and !$col_obj )
+    if ( $is_column and !$table )
     {
         return $self->do_err("Ambiguous column name '$c'") if ( $is_duplicate->{$c} );
+        return $self->do_err("No such column '$col'");
         $col = $c;
     }
-    elsif ( !$col_obj )
+    elsif ($is_column)
     {
         my $is_user_def = 1 if ( $self->{opts}->{function_defs}->{$col} );
         return $self->do_err("No such column '$table.$col'")
           unless (    $col_exists->{"$table.$col"}
                    or $col_exists->{ "\L$table." . $col }
                    or $is_user_def );
-
     }
 
-    return ( $table, $col );
+    return ( $table, $col ) if ($is_column);
 }
 
 sub verify_columns
@@ -1806,9 +1861,17 @@ sub get_user_func_table
     # my $tempTable = SQL::Statement::TempTable->new(
     #     $name, $col_names, $col_names, $data_aryref
     # );
-    my $tempTable = SQL::Statement::RAM->new( $name, $col_names, $data_aryref );
+    my $tempTable = SQL::Statement::RAM::Table->new( $name, $col_names, $data_aryref );
     $tempTable->{all_cols} ||= $col_names;
     return $tempTable;
+}
+
+sub capability($)
+{
+    my ( $self, $capname ) = @_;
+    return $self->{capabilities}->{$capname} if ( defined( $self->{capabilities}->{$capname} ) );
+
+    return;
 }
 
 sub DESTROY
@@ -1823,11 +1886,8 @@ sub DESTROY
     undef $self->{col_obj};
     undef $self->{column_names};
     undef $self->{columns};
-    undef $self->{computed_column};
     undef $self->{cur_table};
     undef $self->{data};
-    undef $self->{fetched_value};
-    undef $self->{fetched_from_key};
     undef $self->{group_by};
     undef $self->{has_OR};
     undef $self->{join};
@@ -2035,9 +2095,13 @@ sub getAffectedResult    # (\@)
 package SQL::Statement::TempTable;
 
 use vars qw(@ISA);
-require SQL::Eval;
 
-@ISA = qw(SQL::Eval::Table);
+BEGIN
+{
+    require SQL::Eval;
+
+    @SQL::Statement::TempTable::ISA = qw(SQL::Eval::Table);
+}
 
 sub new
 {
@@ -2058,7 +2122,7 @@ sub new
                  rowpos     => 0,
                  maxrow     => scalar @$table
                };
-    return bless $self, $class;
+    return $class->SUPER::new($self);
 }
 
 sub is_shared($) { $_[0]->{is_shared}->{ $_[1] }; }
@@ -2068,14 +2132,14 @@ sub column_num($)
 {
     my ( $s, $col ) = @_;
     my $new_col = $s->{col_nums}->{$col};
-    if ( !defined $new_col )
+    unless ( defined($new_col) )
     {
-        my @tmp = split '~', $col;
-        return undef unless ( 2 == scalar(@tmp) );
+        my @tmp = split( '~', $col );
+        return unless ( 2 == scalar(@tmp) );
         $new_col = lc( $tmp[0] ) . '~' . $tmp[1];
         $new_col = $s->{col_nums}->{$new_col};
     }
-    $new_col;
+    return $new_col;
 }
 
 sub fetch_row()
@@ -2236,9 +2300,113 @@ directions. If you want to join the development team, or just hear more
 about the development, write Jeff (<jzuckerATcpan.org>) or Jens
 (<rehsackATcpan.org>) a note.
 
-=begin undocumented
-
 =head1 METHODS
+
+Following methods can or must be overriden by derived classes.
+
+=head2 capability
+
+This method is called for quicker check for capabilies than
+C<< $self->can('method_name') >>. Currently no capabilities for the Statement
+objects are required - but analogous to C<< SQL::Eval::Table::capability >>
+it's declared for future use.
+
+=head2 open_table
+
+The C<< open_table >> method must be overriden by derived classes to provide
+the capability of opening data tables. This is is must have.
+
+Arguments given to open_table call:
+
+=over 4
+
+=item C<< $data >>
+
+The database memo parameter. See L</execute>.
+
+=item C<< $table >>
+
+Name of the table to open as parsed from SQL statement.
+
+=item C<< $createMode >>
+
+Flag if the table shall opened in create mode (C<< CREATE TABLE ... >>) or
+any other one. Set to true value in create mode.
+
+=item C<< $lockMode >>
+
+Flag if the table shall opened for writing (any other than C<< SELECT ... >>).
+Set to a true value is this case.
+
+=back
+
+Following methods are required to use SQL::Statement in a DBD (for example).
+
+=head2 new
+
+Instantiates a new SQL::Statement object
+
+Arguments:
+
+=over 4
+
+=item C<< $sql >>
+
+The SQL statement for later actions
+
+=item C<< $parser >>
+
+Instance of a L<SQL::Parser> object or flags for it's instantiation.
+If omitted, default flags are used.
+
+=back
+
+When the basic initalization is completed,
+C<< $self->prepare($sql, $parser) >> is invoked.
+
+=head2 prepare
+
+Prepares SQL::Statement to execute a SQL statement.
+
+Arguments:
+
+=over 4
+
+=item C<< $sql >>
+
+The SQL statement to parse and prepare
+
+=item C<< $parser >>
+
+Instance of a L<SQL::Parser> object to parse given SQL statement.
+
+=back
+
+=head2 execute
+
+Executes prepared statement.
+
+Arguments:
+
+=over 4
+
+=item C<< $data >>
+
+Memo field passed through to calls of instantiated C<< $table >> objects or
+C<< open_table >> calls. In C<< CREATE >> with subquery,
+C<< $data->{Database} >> must be a DBI database handle object.
+
+=item C<< $params >>
+
+Bound params via DBI ...
+
+=back
+
+=head2 errstr
+
+Gives the error string of the last error, if any.
+
+=begin undocumented
 
 =head2 _anycmp
 
@@ -2260,11 +2428,7 @@ about the development, write Jeff (<jzuckerATcpan.org>) or Jens
 
 =head2 do_err
 
-=head2 errstr
-
 =head2 eval_where
-
-=head2 execute
 
 =head2 fetch
 
@@ -2290,8 +2454,6 @@ about the development, write Jeff (<jzuckerATcpan.org>) or Jens
 
 =head2 params
 
-=head2 prepare
-
 =head2 row_values
 
 =head2 run_functions
@@ -2310,7 +2472,35 @@ about the development, write Jeff (<jzuckerATcpan.org>) or Jens
 
 =end undocumented
 
-=head1 Where can I go for more help?
+=head1 SUPPORT
+
+You can find documentation for this module with the perldoc command.
+
+    perldoc SQL::Statement
+
+You can also look for information at:
+
+=over 4
+
+=item * RT: CPAN's request tracker
+
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-Statement>
+
+=item * AnnoCPAN: Annotated CPAN documentation
+
+L<http://annocpan.org/dist/SQL-Statement>
+
+=item * CPAN Ratings
+
+L<http://cpanratings.perl.org/s/SQL-Statement>
+
+=item * Search CPAN
+
+L<http://search.cpan.org/dist/SQL-Statement/>
+
+=back
+
+=head2 Where can I go for more help?
 
 For questions about installation or usage, please ask on the
 dbi-users@perl.org mailing list or post a question on PerlMonks
@@ -2431,6 +2621,11 @@ of C<SQL::Statement>, L<DBD::File> and L<DBD::CSV> and must be a general
 improvement.
 
 =head1 AUTHOR AND COPYRIGHT
+
+Jochen Wiedmann created the original module as an XS (C) extension in 1998.
+Jeff Zucker took over the maintenance in 2001 and rewrote all of the C
+portions in perl and began extending the SQL support. Since 2008, Jens
+Rehsack holds the maintainership.
 
 Copyright (c) 2001,2005 by Jeff Zucker: jzuckerATcpan.org
 Copyright (c) 2007-2010 by Jens Rehsack: rehsackATcpan.org

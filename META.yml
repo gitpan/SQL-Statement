@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               SQL-Statement
-version:            1.27
+version:            1.27_01
 abstract:           SQL parsing and processing engine
 author:
     - Jeff Zucker <jeff@vpservices.com>, Jens Rehsack <rehsack@cpan.org>
@@ -9,7 +9,7 @@ distribution_type:  module
 configure_requires:
     ExtUtils::MakeMaker:  0
 build_requires:
-    DBD::File:     0.37
+    DBD::File:     0.39
     Test::Simple:  0.86
 requires:
     Carp:          0
@@ -21,7 +21,7 @@ requires:
 resources:
     license:      http://dev.perl.org/licenses/
     MailingList:  mailto:dbi-dev@perl.org
-    repository:   https://svn.perl.org/modules/SQL-Statement/
+    repository:   https://svn.perl.org/modules/SQL-Statement/trunk/
 no_index:
     directory:
         - t

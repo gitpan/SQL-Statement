@@ -1,7 +1,7 @@
 package SQL::Statement::Util;
 
 use vars qw($VERSION);
-$VERSION = '1.27';
+$VERSION = '1.27_01';
 
 sub type
 {
