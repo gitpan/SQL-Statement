@@ -6,10 +6,11 @@ use SQLtest;
 use Test::More;
 eval {
     require DBI;
+    require DBI::DBD::SqlEngine;
     require DBD::File;
 };
-if ($@ or $DBD::File::VERSION lt '0.39') {
-        plan skip_all => "Requires DBI > 1.611 and DBD::File >= 0.39";
+if ($@ or $DBI::DBD::SqlEngine::VERSION lt '0.01') {
+        plan skip_all => "Requires DBI > 1.611, DBD::File >= 0.39 and DBI::DBD::SqlEngine >= 0.01";
 }
 else {
     plan tests => 26;
@@ -46,7 +47,7 @@ for (split /\n/,
       DELETE FROM phrase WHERE id = 2                   }
 ){
     $sth = $dbh->prepare($_);
-    ok($sth->execute(),$sth->{f_stmt}->command);
+    ok($sth->execute(),$sth->{sql_stmt}->command);
 }
 
 $sth = $dbh->prepare("SELECT UPPER('a') AS A,phrase FROM phrase");

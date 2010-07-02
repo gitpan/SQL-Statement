@@ -20,7 +20,7 @@ use Data::Dumper;
 use Params::Util qw(_ARRAY0 _ARRAY _HASH);
 use Scalar::Util qw(looks_like_number);
 
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 BEGIN
 {
@@ -915,8 +915,7 @@ sub CREATE_OPERATOR
     $self->{opts}->{function_names}->{ uc $func } = $subname;
 
     $self->feature( 'valid_comparison_operators', uc $func, 1 );
-    $self->create_op_regexen();
-
+    return $self->create_op_regexen();
 }
 
 sub DROP_OPERATOR
@@ -925,7 +924,7 @@ sub DROP_OPERATOR
     $self->{struct}->{command}    = 'DROP_OPERATOR';
     $self->{struct}->{no_execute} = 1;
     $self->feature( 'valid_comparison_operators', uc $type, 0 );
-    $self->create_op_regexen();
+    return $self->create_op_regexen();
 }
 
 sub replace_quoted($)
@@ -2994,7 +2993,7 @@ The $dialect_name parameter may be the name of any dialect
 configuration file on your system.  Use the
 $parser->list('dialects') method to see a list of available
 dialects.  At a minimum it will include "ANSI", "CSV", and
-"AnyData".  For backwards compatiblity 'Ansi' is accepted as a
+"AnyData".  For backwards compatibility 'Ansi' is accepted as a
 synonym for 'ANSI', otherwise the names are case sensitive.
 
 Loading a new dialect configuration file erases all current
@@ -3014,7 +3013,7 @@ instance.  They are divided into the following classes:
 
 Within each class a feature name is either enabled or
 disabled. For example, under "valid_data_types" the name "BLOB"
-may be either disabled or enabled.  If it is not eneabled
+may be either disabled or enabled.  If it is not enabled
 (either by being specifically disabled, or simply by not being
 specified at all) then any SQL string using "BLOB" as a data
 type will throw a syntax error "Invalid data type: 'BLOB'".
@@ -3107,7 +3106,7 @@ statements or to execute them against actual data.  A broader set of
 syntax is supported in the parser than in the executor.  For example
 the parser allows you to specify column constraints like PRIMARY KEY.
 Currently, these are ignored by the execution engine.  Likewise syntax
-such as RESTRICT and CASCADE on DROP statements or LOCAL GLOBAL TEMPPORARY
+such as RESTRICT and CASCADE on DROP statements or LOCAL GLOBAL TEMPORARY
 tables in CREATE are supported by the parser but ignored by the executor.
 
 To see the list of Supported SQL syntax formerly kept in this pod, see L<SQL::Statement>.
@@ -3152,7 +3151,7 @@ B<Parse Structures>
 Here are some further examples of the data structures returned
 by the structure() method after a call to parse().  Only
 specific details are shown for each SQL instance, not the entire
-struture.
+structure.
 
 B<parse()>
 

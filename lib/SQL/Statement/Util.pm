@@ -1,7 +1,7 @@
 package SQL::Statement::Util;
 
 use vars qw($VERSION);
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 sub type
 {
@@ -128,7 +128,7 @@ SQL::Statement::Util
 
 This package contains three utility classes to handle deliverable columns.
 
-=head1 INHERITABCE
+=head1 INHERITANCE
 
   SQL::Statement::Util::Column
   ISA SQL::Statement::Util

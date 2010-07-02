@@ -3,7 +3,7 @@ package SQL::Statement::RAM;
 ############################
 
 use vars qw($VERSION);
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 ####################################
 package SQL::Statement::RAM::Table;
@@ -159,7 +159,7 @@ SQL::Statement::RAM
 
 This package contains support for the internally used SQL::Statement::RAM::Table.
 
-=head1 INHERITABCE
+=head1 INHERITANCE
 
   SQL::Statement::RAM
 
@@ -195,7 +195,7 @@ Deletes the last fetched/pushed row
 
 Updates the last fetched/pushed row
 
-=item trunctate
+=item truncate
 
 Truncates the table at the current position
 

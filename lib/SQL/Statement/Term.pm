@@ -1,6 +1,6 @@
 package SQL::Statement::Term;
 
-our $VERSION = '1.27_01';
+our $VERSION = '1.27_02';
 
 use Scalar::Util qw(weaken);
 

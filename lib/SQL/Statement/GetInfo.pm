@@ -1,7 +1,7 @@
 package SQL::Statement::GetInfo;
 
 use vars qw($VERSION);
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 use SQL::Statement();
 use vars qw(%info);
@@ -473,7 +473,7 @@ SQL::Statement::GetInfo
 
 This package contains support for C<$dbh->get_info()>.
 
-=head1 INHERITABCE
+=head1 INHERITANCE
 
   SQL::Statement::GetInfo
 

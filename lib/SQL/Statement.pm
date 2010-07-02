@@ -30,7 +30,7 @@ use Params::Util qw(_INSTANCE _STRING _ARRAY _ARRAY0 _HASH0 _HASH);
 
 #use locale;
 
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 sub new
 {
@@ -49,9 +49,14 @@ sub new
     $flags->{PrintError}    = 1 unless defined $flags->{PrintError};
     $flags->{text_numbers}  = 1 unless defined $flags->{text_numbers};
     $flags->{alpha_compare} = 1 unless defined $flags->{alpha_compare};
-    for ( keys %{$flags} )
+    
+    unless( blessed( $flags ) ) # avoid copying stale data from earlier parsing sessions
     {
-        $self->{$_} = $flags->{$_};
+        %$self = ( %$self, %{ clone( $flags ) } );
+    }
+    else
+    {
+	$self->{$_} = $flags->{$_} for qw(RaiseError PrintError opts);
     }
 
     $self->{dlm} = '~';
@@ -132,6 +137,7 @@ sub execute
     my ($command) = $self->command();
     return $self->do_err('No command found!') unless ($command);
     ( $self->{NUM_OF_ROWS}, $self->{NUM_OF_FIELDS}, $self->{data} ) = $self->$command( $data, $params );
+    return unless( defined( $self->{NUM_OF_ROWS} ) );
 
     @{ $self->{NAME} } = map { $_->display_name() } @{ $self->{columns} };
 
@@ -142,7 +148,7 @@ sub execute
     {
         push( @{ $self->{tables} }, SQL::Statement::Table->new($_) );
     }
-    $self->{NUM_OF_ROWS} || '0E0';
+    return $self->{NUM_OF_ROWS} || '0E0';
 }
 
 sub CREATE ($$$)
@@ -172,11 +178,11 @@ sub CREATE ($$$)
             $names = $sth->{NAME};
         }
         $names = $sth->{NAME} unless defined $names;
-        my $tbl_data = $sth->{f_stmt}->{data};
+        my $tbl_data = $sth->{sql_stmt}->{data};
         my $tbl_name = $self->{org_table_names}->[0] || $self->tables(0)->name;
 
-        # my @tbl_cols = map {$_->name} $sth->{f_stmt}->columns;
-        #my @tbl_cols=map{$_->name} $sth->{f_stmt}->columns if $sth->{f_stmt};
+        # my @tbl_cols = map {$_->name} $sth->{sql_stmt}->columns;
+        #my @tbl_cols=map{$_->name} $sth->{sql_stmt}->columns if $sth->{sql_stmt};
         my @tbl_cols;
 
         #            @tbl_cols=@{ $sth->{NAME} } unless @tbl_cols;
@@ -193,7 +199,7 @@ sub CREATE ($$$)
         return ( 0, 0 );
     }
     my ( $eval, $foo ) = $self->open_tables( $data, 1, 1 );
-    return undef unless ($eval);
+    return unless ($eval);
     $eval->params($params);
     my ( $row, $table, $col ) = ( [], $eval->table( $self->tables(0)->name() ) );
     if ( _ARRAY( $table->col_names() ) )
@@ -247,7 +253,7 @@ sub DROP ($$$)
     my ($table) = $eval->table( $self->tables(0)->name() );
     $table->drop($data);
 
-    #use mylibs; zwarn $self->{f_stmt};
+    #use mylibs; zwarn $self->{sql_stmt};
     ( -1, 0 );
 }
 
@@ -256,7 +262,7 @@ sub INSERT ($$$)
     my ( $self, $data, $params ) = @_;
 
     my ( $eval, $all_cols ) = $self->open_tables( $data, 0, 1 );
-    return undef unless ($eval);
+    return unless ($eval);
 
     $eval->params($params);
     $self->verify_columns( $data, $eval, $all_cols ) if ( scalar( $self->columns() ) );
@@ -1174,15 +1180,7 @@ sub open_tables
             undef $@;
             eval {
                 my $open_name = $self->{org_table_names}->[$count];
-                if ( $caller && $caller =~ m/^DBD::AnyData/ )
-                {
-                    $caller .= '::Statement' unless ( $caller =~ m/::Statement/ );
-                    $t->{$name} = $caller->open_table( $data, $open_name, $createMode, $lockMode );
-                }
-                else
-                {
-                    $t->{$name} = $self->open_table( $data, $open_name, $createMode, $lockMode );
-                }
+		$t->{$name} = $self->open_table( $data, $open_name, $createMode, $lockMode );
             };
             my $err = $t->{$name}->{errstr};
             return $self->do_err($err) if ($err);
@@ -2302,18 +2300,18 @@ about the development, write Jeff (<jzuckerATcpan.org>) or Jens
 
 =head1 METHODS
 
-Following methods can or must be overriden by derived classes.
+Following methods can or must be overridden by derived classes.
 
 =head2 capability
 
-This method is called for quicker check for capabilies than
+This method is called for quicker check for capabilities than
 C<< $self->can('method_name') >>. Currently no capabilities for the Statement
 objects are required - but analogous to C<< SQL::Eval::Table::capability >>
 it's declared for future use.
 
 =head2 open_table
 
-The C<< open_table >> method must be overriden by derived classes to provide
+The C<< open_table >> method must be overridden by derived classes to provide
 the capability of opening data tables. This is is must have.
 
 Arguments given to open_table call:
@@ -2361,7 +2359,7 @@ If omitted, default flags are used.
 
 =back
 
-When the basic initalization is completed,
+When the basic initialization is completed,
 C<< $self->prepare($sql, $parser) >> is invoked.
 
 =head2 prepare
@@ -2600,7 +2598,7 @@ For SQL::Statement 1.xx it's not planned to add new XS parts.
 Wildcards are expanded to lower cased identifiers. This might confuse
 some people, but it was easier to implement.
 
-The warning from L<DBI>, never trust on case sensetiveness of returned column
+The warning from L<DBI>, never trust on case sensitiveness of returned column
 names should be read more often. If you need to rely on identifiers, always
 use C<sth-E<gt>{NAME_lc}> or C<sth-E<gt>{NAME_uc}> - never rely on
 C<sth-E<gt>{NAME}>:

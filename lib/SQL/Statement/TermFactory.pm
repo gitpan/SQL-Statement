@@ -9,7 +9,7 @@ use Data::Dumper;
 use Params::Util qw(_HASH _ARRAY0 _INSTANCE);
 use Scalar::Util qw(blessed weaken);
 
-our $VERSION = '1.27_01';
+our $VERSION = '1.27_02';
 
 my %oplist = (
                '='       => 'Equal',
@@ -186,7 +186,7 @@ Those terms are used to access data from the table(s) - either when evaluating
 the where clause or returning column data.
 
 The concept of a factory can be studied in I<Design Patterns> by the Gang of
-Four. The concept of using polymophism instead of conditions is suggested by
+Four. The concept of using polymorphism instead of conditions is suggested by
 Martin Fowler in his book I<Refactoring>.
 
 =head1 METHODS

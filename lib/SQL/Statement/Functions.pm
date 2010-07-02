@@ -68,7 +68,7 @@ In addition to the built-in functions, you can create any number of your own use
 
       $dbh->do(' LOAD "Bar::Baz" ');
 
-Functions themselves should follow SQL identifier naming rules.  Subroutines loaded with CREATE FUNCTION can have any valied perl subrourinte name.  Subroutines loaded with LOAD must start with SQL_FUNCTION_ and then the actual function name.  For example:
+Functions themselves should follow SQL identifier naming rules.  Subroutines loaded with CREATE FUNCTION can have any valid perl subroutine name.  Subroutines loaded with LOAD must start with SQL_FUNCTION_ and then the actual function name.  For example:
 
  package Qux::Quimble;
  sub SQL_FUNCTION_FOO { ... }
@@ -83,7 +83,7 @@ Functions themselves should follow SQL identifier naming rules.  Subroutines loa
 
 =head2 Creating User-Defined Functions
 
-User-defined functions (UDFs) are perl subroutines that return values appropriate to the context of the function in a SQL statement.  For example the built-in CURRENT_TIME returns a string value and therefore may beused anywhere in a SQL statement that a string value can.  Here' the entire perl code for the function:
+User-defined functions (UDFs) are perl subroutines that return values appropriate to the context of the function in a SQL statement.  For example the built-in CURRENT_TIME returns a string value and therefore may be used anywhere in a SQL statement that a string value can.  Here' the entire perl code for the function:
 
  # CURRENT_TIME
  #
@@ -119,7 +119,7 @@ The third argument, $rowhash, is a reference to a hash containing the key/value 
      my $str = join ':', values %$rowhash;
  }
 
-The remaining arguments, @params, are aguements passed by users to the function, either directly or with placeholders; another silly example which just returns the results of multiplying the arguments passed to it:
+The remaining arguments, @params, are arguments passed by users to the function, either directly or with placeholders; another silly example which just returns the results of multiplying the arguments passed to it:
 
  sub MULTIPLY {
      my($self,$sth,$rowhash,@params);
@@ -198,7 +198,7 @@ Table-Returning functions are a way to turn *anything* that can be modeled as an
 =cut
 
 use vars qw($VERSION);
-$VERSION = '1.27_01';
+$VERSION = '1.27_02';
 
 =pod
 
@@ -587,7 +587,6 @@ sub SQL_FUNCTION_IMPORT
     elsif ( _INSTANCE( $params[0], 'DBI::st' ) )
     {
 
-        #   my @cols = map{$_->name} $tmp_sth->{f_stmt}->columns if $tmp_sth->{f_stmt};
         my @cols;
         @cols = @{ $params[0]->{NAME} } unless @cols;
 
@@ -610,7 +609,7 @@ sub SQL_FUNCTION_IMPORT
 sub SQL_FUNCTION_RUN
 {
     my ( $self, $owner, $file ) = @_;
-    my @params = $owner->{f_stmt}->params();
+    my @params = $owner->{sql_stmt}->params();
     @params = () unless @params;
     local *IN;
     open( IN, '<', $file ) or die "Couldn't open SQL File '$file': $!\n";

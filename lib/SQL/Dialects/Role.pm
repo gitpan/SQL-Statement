@@ -5,7 +5,7 @@ use warnings;
 
 use base qw(Exporter);
 our @EXPORT  = qw(get_config_as_hash);
-our $VERSION = '1.27_01';
+our $VERSION = '1.27_02';
 
 sub get_config_as_hash
 {
@@ -81,7 +81,7 @@ The role implements...
 
 Returns the data represented in get_config() as a hash ref.
 
-Items will be upcased, sections will be lowered.
+Items will be upper-cased, sections will be lower-cased.
 
 The example in the SYNOPSIS would come back as...
 
