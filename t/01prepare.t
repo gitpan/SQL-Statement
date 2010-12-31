@@ -1,28 +1,37 @@
-#!perl -w
+#!/usr/bin/perl -w
 use strict;
-$|=1;
-use lib qw' ./ ./t ';
-use SQLtest;
-use Test::More tests => 113;
+use warnings;
+use lib qw(t);
 
-$SQLtest::DEBUG = 1;
+use Test::More;
+use Params::Util qw(_INSTANCE);
+use TestLib qw(connect prove_reqs show_reqs);
 
-$parser = new_parser();
-$parser->{PrintError}=1;
-$parser->{RaiseError}=1;
-my $count;
-my @data;
-for (<DATA>) {
-    chomp;
-    last if /^#/;
-    next if /^\s*\/\*/;
-    next if /^\s*$/;
-    push @data,$_;
-}
-for my $sql(@data) {
-    ok( parse($sql), "parse '$sql'" );
-}
-__DATA__
+my ( $required, $recommended ) = prove_reqs();
+my @test_dbds = ( 'SQL::Statement', grep { /^dbd:/i } keys %{$recommended} );
+
+foreach my $test_dbd (@test_dbds)
+{
+    my $dbh;
+
+    # Test RaiseError for prepare errors
+    #
+    my %extra_args;
+    if ( $test_dbd =~ m/^DBD::/i )
+    {
+	$extra_args{sql_dialect} = "ANSI";
+    }
+    $dbh = connect(
+                    $test_dbd,
+                    {
+                       PrintError => 0,
+                       RaiseError => 0,
+		       %extra_args,
+                    }
+                  );
+
+    for my $sql(
+		split /\n/, <<""
   /* DROP TABLE */
 DROP TABLE foo
 DROP TABLE foo CASCADE
@@ -154,3 +163,49 @@ SELECT * FROM bar WHERE foo BETWEEN ('aa','bb')
 SELECT * FROM bar WHERE foo BETWEEN (1.41,9.81)
 SELECT * FROM bar WHERE foo NOT BETWEEN ('aa','bb')
 SELECT * FROM bar WHERE foo NOT BETWEEN (1.41,9.81)
+
+	       ) {
+	ok( eval { $dbh->prepare($sql); }, "parse '$sql' using $test_dbd" ) or diag( $dbh->errstr() );
+    }
+
+    SKIP:
+    {
+	my $sql = "SELECT a FROM b JOIN c WHERE c=? AND e=7 ORDER BY f ASC, g DESC LIMIT 5,2";
+	my $sth;
+	eval { $sth = $dbh->prepare( $sql ) };
+	ok( !$@, '$sth->new' ) or skip("Can't instantiate SQL::Statement: $@");
+	cmp_ok( $sth->command,           'eq', 'SELECT', '$sth->command' );
+	cmp_ok( scalar( $sth->params ),  '==', 1,        '$sth->params' );
+	cmp_ok( $sth->tables(1)->name(), 'eq', 'c',      '$sth->tables' );
+	ok( defined( _INSTANCE( $sth->where(), 'SQL::Statement::Operation::And' ) ),
+	    '$sth->where()->op' );
+	ok( defined( _INSTANCE( $sth->where()->{LEFT}, 'SQL::Statement::Operation::Equal' ) ),
+	    '$sth->where()->left' );
+	ok( defined( _INSTANCE( $sth->where()->{LEFT}->{LEFT}, 'SQL::Statement::ColumnValue' ) ),
+	    '$sth->where()->left->left' );
+	ok( defined( _INSTANCE( $sth->where()->{LEFT}->{RIGHT}, 'SQL::Statement::Placeholder' ) ),
+	    '$sth->where()->left->right' );
+	cmp_ok( $sth->limit(),  '==', 2, '$sth->limit' );
+	cmp_ok( $sth->offset(), '==', 5, '$sth->offset' );
+
+	note( "Command      " . $sth->command() );
+	note( "Num Pholders " . scalar $sth->params() );
+	note( "Columns      " . join ',', map { $_->name } $sth->columns() );
+	note( "Tables       " . join ',', $sth->tables() );
+	note( "Where op     " . join ',', $sth->where->op() );
+	note( "Limit        " . $sth->limit() );
+	note( "Offset       " . $sth->offset );
+	my @order_cols = $sth->order();
+	note( "Order Cols   " . join( ',', map { keys %$_ } @order_cols ) );
+    }
+
+    my $sth = $dbh->prepare( "INSERT a VALUES(3,7)" );
+    cmp_ok( scalar( $sth->row_values() ),  '==', 1, '$stmt->row_values()' );
+    cmp_ok( scalar( $sth->row_values(0) ), '==', 2, '$stmt->row_values(0)' );
+    cmp_ok( scalar( $sth->row_values( 0, 1 ) )->{value}, '==', 7, '$stmt->row_values(0,1)' );
+    cmp_ok( ref( $sth->parser()->structure ), 'eq', 'HASH',   'structure' );
+    cmp_ok( $sth->parser()->command(),        'eq', 'INSERT', 'command' );
+
+    ok( $dbh->prepare( "SELECT DISTINCT c1 FROM tbl" ), 'distinct' );
+}
+done_testing();

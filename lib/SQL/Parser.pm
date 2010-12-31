@@ -16,11 +16,10 @@ use warnings;
 use vars qw($VERSION);
 use constant FUNCTION_NAMES => join( '|', qw(TRIM SUBSTRING) );
 use Carp qw(carp croak);
-use Data::Dumper;
 use Params::Util qw(_ARRAY0 _ARRAY _HASH);
 use Scalar::Util qw(looks_like_number);
 
-$VERSION = '1.31';
+$VERSION = '1.32';
 
 BEGIN
 {
@@ -132,15 +131,18 @@ sub parse
         if (    defined( $self->{struct}->{column_defs} )
              && defined( _ARRAY( $self->{struct}->{column_defs} ) ) )
         {
-            foreach my $col ( @{ $self->{struct}->{column_defs} } )
+            my $colname;
+            # FIXME SUBSTR('*')
+            my @fine_defs =
+              grep { defined( $_->{fullorg} ) && ( -1 == index( $_->{fullorg}, '*' ) ) }
+              @{ $self->{struct}->{column_defs} };
+            foreach my $col (@fine_defs)
             {
-                next
-                  unless ( defined( $col->{fullorg} ) && ( -1 == index( $col->{fullorg}, '*' ) ) );
-                my $cn = $col->{fullorg};
+                my $colname = $col->{fullorg};
                 #$cn = lc $cn unless ( $cn =~ m/^(?:\w+\.)?"/ );
                 push(
                       @{ $self->{struct}->{org_col_names} },
-                      $self->{struct}->{ORG_NAME}->{$cn} || $cn
+                      $self->{struct}->{ORG_NAME}->{$colname} || $colname
                     );
             }
 
@@ -148,19 +150,14 @@ sub parse
             {
                 $self->{struct}->{table_names} = \@tables;
                 #  For RR aliases, added quoted id protection from upper casing
-                foreach my $col ( @{ $self->{struct}->{column_defs} } )
+                foreach my $col (@fine_defs)
                 {
-                    next
-                      unless ( defined( $col->{fullorg} )
-                               && ( -1 == index( $col->{fullorg}, '*' ) ) );    # FIXME SUBSTR('*')
-                    my $orgname = $col->{fullorg};
-                    my $colname = $orgname;
-                    $colname = lc $colname unless ( $colname =~ m/^(?:\p{Word}+\.)?"/ );
-                    unless ( defined( $self->{struct}->{ORG_NAME}->{$colname} ) )
-                    {
-                        $self->{struct}->{ORG_NAME}->{$colname} =
-                          $self->{struct}->{ORG_NAME}->{$orgname};
-                    }
+                    # defined( $col->{fullorg} ) && ( -1 == index( $col->{fullorg}, '*' ) ) or next;
+                    my $orgname = $colname = $col->{fullorg};
+                    $colname =~ m/^(?:\p{Word}+\.)?"/ or $colname = lc $colname;
+                    defined( $self->{struct}->{ORG_NAME}->{$colname} ) and next;
+                    $self->{struct}->{ORG_NAME}->{$colname} =
+                      $self->{struct}->{ORG_NAME}->{$orgname};
                 }
                 #my @uCols = map { ( $_ =~ /^(\w+\.)?"/ ) ? $_ : lc $_ } @{ $self->{struct}->{column_names} };
                 #$self->{struct}->{column_names} = \@uCols;
@@ -299,6 +296,8 @@ sub dialect
     $self->create_op_regexen();
     $self->{dialect} = $dialect;
     $self->{dialect_set}++;
+
+    return $self->{dialect};
 }
 
 sub _load_class
@@ -568,7 +567,7 @@ sub EXPLICIT_JOIN
     my ( $self, $remainder ) = @_;
     return undef unless ($remainder);
     my ( $tableA, $tableB, $keycols, $jtype, $natural );
-    if ( $remainder =~ m/^(.+?) (NATURAL|INNER|LEFT|RIGHT|FULL|UNION|JOIN)(.+)$/is )
+    if ( $remainder =~ m/^(.+?) (NATURAL|INNER|LEFT|RIGHT|FULL|CROSS|UNION|JOIN)(.+)$/is )
     {
         $tableA    = $1;
         $remainder = $2 . $3;
@@ -583,13 +582,13 @@ sub EXPLICIT_JOIN
         $natural++;
         $remainder = $1;
     }
-    if ( $remainder =~ m/^(INNER|LEFT|RIGHT|FULL|UNION) JOIN (.+)/i )
+    if ( $remainder =~ m/^(INNER|LEFT|RIGHT|FULL|CROSS|UNION) JOIN (.+)/i )
     {
         $jtype = $self->{struct}->{join}->{clause} = uc($1);
         $remainder = $2;
         $jtype = "$jtype OUTER" if $jtype !~ /INNER|UNION/i;
     }
-    if ( $remainder =~ m/^(LEFT|RIGHT|FULL) OUTER JOIN (.+)/i )
+    if ( $remainder =~ m/^(LEFT|RIGHT|FULL|CROSS) OUTER JOIN (.+)/i )
     {
         $jtype = $self->{struct}->{join}->{clause} = uc($1) . " OUTER";
         $remainder = $2;
@@ -1391,6 +1390,7 @@ sub SELECT_LIST
                 $newcol->{alias}               = $alias;
                 $aliases{ $newcol->{fullorg} } = $alias;
                 $self->{struct}->{ORG_NAME}->{ $newcol->{fullorg} } = $alias;
+                $self->{struct}->{ALIASES}->{$alias} = $newcol->{fullorg};
             }
             push( @newcols, $newcol );
         }
@@ -1494,18 +1494,19 @@ sub SORT_SPEC_LIST
         elsif ( $col =~ /^\s*(\S+)\s*$/si )
         {
             $newcol = $1;
+            $newarg = 'ASC';
         }
         else
         {
             return $self->do_err('Junk after column name in ORDER BY clause!');
         }
-        return undef if !( $newcol = $self->COLUMN_NAME($newcol) );
+        $newcol = $self->COLUMN_NAME($newcol) or return;
         if ( $newcol =~ /^(.+)\..+$/s )
         {
             my $table = $1;
             $self->_verify_tablename( $table, "ORDER BY" );
         }
-        push @ocols, { $newcol => $newarg };
+        push( @ocols, { $newcol => $newarg } );
     }
     $self->{struct}->{sort_spec_list} = \@ocols;
     return 1;
@@ -2208,7 +2209,6 @@ sub ROW_VALUE
                 my $now = pos($str);
                 ++$i;
                 $term = substr( $str, $start, $now - $start, "?$i?" );
-                print( STDERR Data::Dumper::Dumper( \$str, \$term ) );
                 push( @vals, $term );
                 pos($str) = $start + length("?$i?");
             }
@@ -2831,15 +2831,16 @@ sub clean_sql
 
     #
     foreach (@$fields) { $_ =~ s/''/\\'/g; }
-    if ( $sql =~ tr/[^\\]'// % 2 == 1 )
+    my @a = $sql =~ m/((?<!\\)(?:(?:\\\\)*)')/g;
+    if ( ( scalar(@a) % 2 ) == 1 )
     {
         $sql =~ s/^.*\?(.+)$/$1/;
-        $self->do_err("Mismatched single quote before: '$sql'");
+        $self->do_err("Mismatched single quote before: <$sql>");
     }
     if ( $sql =~ m/\?\?(\d)\?/ )
     {
         $sql = $fields->[$1];
-        $self->do_err("Mismatched single quote: '$sql");
+        $self->do_err("Mismatched single quote: <$sql>");
     }
     foreach (@$fields) { $_ =~ s/$e'/'/g; s/^'(.*)'$/$1/; }
 

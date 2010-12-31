@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               SQL-Statement
-version:            1.31
+version:            1.32
 abstract:           SQL parsing and processing engine
 author:
     - Jeff Zucker <jeff@vpservices.com>, Jens Rehsack <rehsack@cpan.org>
@@ -9,8 +9,13 @@ distribution_type:  module
 configure_requires:
     ExtUtils::MakeMaker:  0
 build_requires:
-    DBD::File:            0.39
-    DBI::DBD::SqlEngine:  0.01
+    DBD::AnyData:         0.110
+    DBD::CSV:             0.30
+    DBD::DBM:             0.06
+    DBD::File:            0.40
+    DBD::SQLite:          0
+    DBI::DBD::SqlEngine:  0.03
+    MLDBM:                0
     Test::Simple:         0.90
 requires:
     Carp:          0

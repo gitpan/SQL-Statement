@@ -30,7 +30,7 @@ use Params::Util qw(_INSTANCE _STRING _ARRAY _ARRAY0 _HASH0 _HASH);
 
 #use locale;
 
-$VERSION = '1.31';
+$VERSION = '1.32';
 
 sub new
 {
@@ -80,12 +80,15 @@ sub new
 sub prepare
 {
     my ( $self, $sql, $parser ) = @_;
-    return $self if ( $self->{already_prepared}->{$sql} );
-    $self->{already_prepared} =
-      {};    # delete earlier preparations, they're overwritten after this prepare run
+
+    $self->{already_prepared}->{$sql} and return;
+
+    # delete earlier preparations, they're overwritten after this prepare run
+    $self->{already_prepared} = {};
     my $rv = $parser->parse($sql);
     if ($rv)
     {
+        undef $self->{errstr};
         my $parser_struct = clone( $parser->{struct} );
         while ( my ( $k, $v ) = each( %{$parser_struct} ) )
         {
@@ -123,14 +126,14 @@ sub prepare
             }
         }
 
-        $self->{already_prepared}->{$sql}++;
+        ++$self->{already_prepared}->{$sql};
         return $self;
     }
     else
     {
         $self->{errstr} = $parser->errstr;
-        $self->{already_prepared}->{$sql}++;
-        return undef;
+        ++$self->{already_prepared}->{$sql};
+        return;
     }
 }
 
@@ -967,14 +970,15 @@ sub SELECT($$)
                 $col = $val;
                 $tbl = $tableName;
             }
+            $tbl ||= '';
+            $columns{$tbl}->{$col} = $numFields++;
         }
         else
         {
             ( $col, $tbl ) = ( $column->name(), $column->table() );
+            $tbl ||= '';
+            $columns{$tbl}->{ $column->display_name() } = $columns{$tbl}->{$col} = $numFields++;
         }
-
-        $tbl ||= '';
-        $columns{$tbl}->{$col} = $numFields++;
 
         #
         # handle functions in select list
@@ -1007,7 +1011,7 @@ sub SELECT($$)
         foreach (@names) { $_ =~ s/^[^$self->{dlm}]+$self->{dlm}//; }
     }
     $self->{NAME} = \@names;
-    $self->verify_order_cols($table);
+    # $self->verify_order_cols($table);
     my @order_by      = $self->order();
     my @extraSortCols = ();
 
@@ -1030,10 +1034,8 @@ sub SELECT($$)
             if ( $self->{join} )
             {
                 $pos = $table->column_num( $tbl . $self->{dlm} . $col );
-                if ( !defined $pos )
-                {
-                    $pos = $table->column_num( $tbl . '_' . $col );
-                }
+                defined($pos)
+                  or $pos = $table->column_num( $tbl . '_' . $col );
             }
             next if ( exists( $columns{$tbl}->{$col} ) );
             $pos = $table->column_num($col) unless ( defined($pos) );
@@ -1047,6 +1049,7 @@ sub SELECT($$)
     # begin count for limiting if there's a limit clasue and no order clause
     #
     my $limit_count = 0 if ( $self->limit() and !$self->order() );
+    my $limit       = $self->limit();
     my $row_count   = 0;
     my $offset      = $self->offset() || 0;
     while ( my $array = $table->fetch_row($data) )
@@ -1054,17 +1057,15 @@ sub SELECT($$)
         if ( $self->eval_where( $e, $tableName, $array, \%funcs ) )
         {
             next if ( defined($limit_count) and ( $row_count++ < $offset ) );
-            $limit_count++ if ( defined($limit_count) );
 
             my @row = map { $_->value($e) } $self->columns();
             push( @{$rows}, \@row );
 
             # We quit here if there's a limit clause without order clause
             # and the limit has been reached
-            if ( defined($limit_count) && ( $limit_count >= $self->limit() ) )
-            {
-                return ( scalar( @{$rows} ), $numFields, $rows );
-            }
+            defined($limit_count)
+              and ( ++$limit_count >= $limit )
+              and return ( $limit, $numFields, $rows );
         }
     }
 
@@ -1096,29 +1097,27 @@ sub SELECT($$)
 
     if (@order_by)
     {
+        use sort 'stable';
         my @sortCols = map {
-            my $col = $_->column();
-            my $tbl = $_->table();
-            if ( $self->{join} )
-            {
-                $tbl = 'shared' if ( $table->is_shared($col) );
-            }
+            my ( $col, $tbl ) = ( $_->column(), $_->table() );
+            $self->{join} and $table->is_shared($col) and $tbl = 'shared';
             $tbl ||= $self->colname2table($col) || '';
             ( $columns{$tbl}->{$col}, $_->desc() )
         } @order_by;
 
-        @{$rows} = sort {
-            my ( $result, $colNum, $desc );
-            $i = 0;
-            do
-            {
-                $colNum = $sortCols[ $i++ ];
-                $desc   = $sortCols[ $i++ ];
+        $i = scalar(@sortCols);
+        do
+        {
+            my $desc   = $sortCols[ --$i ];
+            my $colNum = $sortCols[ --$i ];
+            @{$rows} = sort {
+                my $result;
                 $result = _anycmp( $a->[$colNum], $b->[$colNum] );
-                $result = -$result if ($desc);
-            } while ( !$result && $i < @sortCols );
-            $result;
-        } @{$rows};
+                $desc and $result = -$result;
+                $result;
+            } @{$rows};
+        } while ( $i > 0 );
+        use sort 'defaults';    # for perl < 5.10.0
     }
 
     if ( defined( $self->limit() ) )
@@ -1166,13 +1165,26 @@ sub eval_where
     return $self->{where_terms}->value($eval);
 }
 
-sub fetch
+sub fetch_row
 {
     my ($self) = @_;
     $self->{data} ||= [];
     my $row = shift @{ $self->{data} };
-    return undef unless $row and scalar @$row;
+    return unless $row and scalar @$row;
     return $row;
+}
+
+no warnings 'once';
+*fetch = \&fetch_row;
+
+use warnings;
+
+sub fetch_rows
+{
+    my $self = $_[0];
+    my $rows = $self->{data} || [];
+    $self->{data} = [];
+    return $rows;
 }
 
 sub open_table ($$$$$) { croak "Abstract method " . ref( $_[0] ) . "::open_table called" }
@@ -1279,8 +1291,6 @@ sub open_tables
         $self->{all_cols} = $all_cols;
     }
     ##################################################
-
-    $self->buildSortSpecList();
 
     return SQL::Eval->new( { 'tables' => $t } ), \@c;
 }
@@ -1426,39 +1436,12 @@ sub buildColumnObjects($)
     return;
 }
 
-sub buildSortSpecList()
-{
-    my $self = $_[0];
-
-    if ( $self->{sort_spec_list} )
-    {
-        for my $i ( 0 .. scalar @{ $self->{sort_spec_list} } - 1 )
-        {
-            next
-              if ( defined( _INSTANCE( $self->{sort_spec_list}->[$i], 'SQL::Statement::Order' ) ) );
-            my ( $newcol, $direction ) = each %{ $self->{sort_spec_list}->[$i] };
-            undef $direction unless ( $direction && $direction eq 'DESC' );
-
-            # XXX parse order by like group by and select list
-            my ( $tbl, $col ) = $self->full_qualified_column_name($newcol);
-            $self->{sort_spec_list}->[$i] = SQL::Statement::Order->new(
-                col => SQL::Statement::Util::Column->new(
-                    $col,    # column name
-                    $tbl,    # table name
-                    SQL::Statement::ColumnValue->new( $self, $tbl . '.' . $col ),    # term
-                                                                                     # display name
-                                                        ),
-                desc => $direction,
-                                                                      );
-        }
-    }
-
-    return;
-}
-
 sub verify_expand_column
 {
     my ( $self, $c, $i, $usr_cols, $is_duplicate, $col_exists ) = @_;
+
+    # XXX
+    defined $self->{ALIASES}->{$c} and $c = $self->{ALIASES}->{$c};
 
     my ( $table, $col, $col_obj );
     if ( $c =~ m/(\S+)\.(\S+)/ )
@@ -1470,6 +1453,10 @@ sub verify_expand_column
     {
         $col_obj = $usr_cols->[ ${$i} ];
         ( $table, $col ) = ( $col_obj->{table}, $col_obj->{name} );
+    }
+    else
+    {
+        ( $table, $col ) = $self->full_qualified_column_name($c);
     }
     return unless ($col);
 
@@ -1502,7 +1489,8 @@ sub verify_expand_column
                    or $is_user_def );
     }
 
-    return ( $table, $col ) if ($is_column);
+    return ( $table, $col ) if ( $is_column or ${$i} < 0 );
+    return;
 }
 
 sub verify_columns
@@ -1606,6 +1594,35 @@ sub verify_columns
                     join( "', '", keys( %{$set_fully} ) )
                 )
               );
+        }
+    }
+
+    if ( $self->{sort_spec_list} )
+    {
+        for my $n ( 0 .. scalar @{ $self->{sort_spec_list} } - 1 )
+        {
+            defined( _INSTANCE( $self->{sort_spec_list}->[$n], 'SQL::Statement::Order' ) ) and next;
+            my ( $newcol, $direction ) = each %{ $self->{sort_spec_list}->[$n] };
+            my $desc = $direction eq "DESC";
+
+            # XXX parse order by like group by and select list
+            $i = -2;
+            my ( $table, $col ) =
+              $self->verify_expand_column( $newcol, \$i, \@usr_cols, \%is_duplicate, \%col_exists );
+            $self->{errstr} and return;
+            ( $table, $col ) = $self->full_qualified_column_name($newcol)
+              if ( defined($col) && !defined($table) );
+            defined($table) and $col = $table . "." . $col;
+            $self->{sort_spec_list}->[$n] = SQL::Statement::Order->new(
+                col => SQL::Statement::Util::Column->new(
+                    $col,      # column name
+                    $table,    # table name
+                    SQL::Statement::ColumnValue->new( $self, $col ),    # term
+                    $newcol                                             # display name
+                                                        ),
+                direction => $direction,
+                desc      => $desc,
+                                                                      );
         }
     }
 
@@ -1731,7 +1748,10 @@ sub colname2table($)
 sub full_qualified_column_name($)
 {
     my ( $self, $col_name ) = @_;
-    return undef unless ( defined($col_name) );
+    return unless ( defined($col_name) );
+
+    # XXX
+    defined $self->{ALIASES}->{$col_name} and $col_name = $self->{ALIASES}->{$col_name};
 
     my ( $tbl, $col );
     unless ( ( $tbl, $col ) = $col_name =~ m/^((?:"[^"]+")|(?:[^.]+))\.(.*)$/ )
@@ -1765,45 +1785,42 @@ sub full_qualified_column_name($)
     return ( $tbl, $col );
 }
 
-sub verify_order_cols
-{
-    my ( $self, $table ) = @_;
-    return unless $self->{sort_spec_list};
-    my @ocols = $self->order();
-    my @tcols = @{ $table->col_names() };
-    my @n_ocols;
-
-    for my $colnum ( 0 .. $#ocols )
-    {
-        my $col = $self->order($colnum);
-
-        if ( !defined( $col->table() ) )
-        {
-            my $cname = $ocols[$colnum]->{col}->name();
-            my $tname = $self->colname2table($cname);
-            return $self->do_err("No such column '$cname'.") unless ($tname);
-            $self->{sort_spec_list}->[$colnum]->{col}->{table} = $tname;
-            push( @n_ocols, $tname );
-        }
-    }
-
-    return 1;
-}
+#sub verify_order_cols
+#{
+#    my ( $self, $table ) = @_;
+#    return unless $self->{sort_spec_list};
+#    my @ocols = $self->order();
+#    my @tcols = @{ $table->col_names() };
+#    my @n_ocols;
+#
+#    for my $colnum ( 0 .. $#ocols )
+#    {
+#        my $col = $self->order($colnum);
+#
+#        if ( !defined( $col->table() ) )
+#        {
+#            my $cname = $ocols[$colnum]->{col}->name();
+#            my $tname = $self->colname2table($cname);
+#            return $self->do_err("No such column '$cname'.") unless ($tname);
+#            $self->{sort_spec_list}->[$colnum]->{col}->{table} = $tname;
+#            push( @n_ocols, $tname );
+#        }
+#    }
+#
+#    return 1;
+#}
 
 sub limit ($)  { $_[0]->{limit_clause}->{limit}; }
 sub offset ($) { $_[0]->{limit_clause}->{offset}; }
 
 sub order
 {
-    if ( !defined $_[0]->{sort_spec_list} ) { return (); }
-    if ( looks_like_number( $_[1] ) )
-    {
-        return $_[0]->{sort_spec_list}->[ $_[1] ];
-    }
+    return unless ( defined $_[0]->{sort_spec_list} );
 
-    return wantarray
-      ? @{ $_[0]->{sort_spec_list} }
-      : scalar @{ $_[0]->{sort_spec_list} };
+    return
+        defined( $_[1] ) && looks_like_number( $_[1] ) ? $_[0]->{sort_spec_list}->[ $_[1] ]
+      : wantarray ? @{ $_[0]->{sort_spec_list} }
+      :             scalar @{ $_[0]->{sort_spec_list} };
 }
 
 sub tables
@@ -1917,13 +1934,13 @@ sub get_user_func_table
     my ( $self, $name, $u_func ) = @_;
     my $term = $self->{termFactory}->buildCondition($u_func);
 
-    my ($data_aryref) = $term->value(undef);
-    my $col_names = shift @$data_aryref;
+    my @data_aryref = @{ $term->value(undef) };
+    my $col_names   = shift @data_aryref;
 
     # my $tempTable = SQL::Statement::TempTable->new(
     #     $name, $col_names, $col_names, $data_aryref
     # );
-    my $tempTable = SQL::Statement::RAM::Table->new( $name, $col_names, $data_aryref );
+    my $tempTable = SQL::Statement::RAM::Table->new( $name, $col_names, \@data_aryref );
     $tempTable->{all_cols} ||= $col_names;
     return $tempTable;
 }
@@ -2225,9 +2242,10 @@ sub new ($$)
     my $self  = {@_};
     bless( $self, ( ref($proto) || $proto ) );
 }
-sub table ($)  { $_[0]->{col}->table(); }
-sub column ($) { $_[0]->{col}->name(); }
-sub desc ($)   { $_[0]->{desc}; }
+sub table ($)     { $_[0]->{col}->table(); }
+sub column ($)    { $_[0]->{col}->display_name(); }
+sub desc ($)      { $_[0]->{desc}; }
+sub direction ($) { $_[0]->{direction}; }
 
 package SQL::Statement::Limit;
 
@@ -2483,13 +2501,20 @@ Bound params via DBI ...
 
 Gives the error string of the last error, if any.
 
+=head2 fetch_row
+
+Fetches the next row from the result data set (implies removing the fetched
+row from the result data set).
+
+=head2 fetch_rows
+
+Fetches all (remaining) rows from the result data set.
+
 =begin undocumented
 
 =head2 _anycmp
 
 =head2 buildColumnObjects
-
-=head2 buildSortSpecList
 
 =head2 colname2colnum
 
