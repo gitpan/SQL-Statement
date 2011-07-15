@@ -30,7 +30,7 @@ use Params::Util qw(_INSTANCE _STRING _ARRAY _ARRAY0 _HASH0 _HASH);
 
 #use locale;
 
-$VERSION = '1.33';
+$VERSION = '1.400';
 
 sub new
 {
@@ -177,16 +177,17 @@ sub CREATE ($$$)
         # AS IMPORT
         if ( $subquery =~ m/^IMPORT/i )
         {
-            $sth = $data->{Database}->prepare("SELECT * FROM $subquery");
-            $sth->execute(@$params);
+            $sth = $data->{Database}->prepare("SELECT * FROM $subquery") or
+		return $self->do_err( $data->{Database}->errstr() );
+            $sth->execute(@$params) or return $self->do_err( $sth->errstr() );
             $names = $sth->{NAME};
         }
 
         # AS SELECT
         else
         {
-            $sth = $data->{Database}->prepare($subquery);
-            $sth->execute();
+            $sth = $data->{Database}->prepare($subquery) or return $self->do_err( $data->{Database}->errstr() );
+            $sth->execute() or return $self->do_err( $sth->errstr() );
             $names = $sth->{NAME};
         }
         $names = $sth->{NAME} unless defined $names;
@@ -302,7 +303,7 @@ sub INSERT ($$$)
                 $val = $self->row_values( $k, $i );
                 if ( defined( _INSTANCE( $val, 'SQL::Statement::Param' ) ) )
                 {
-                    $val = $eval->param( $val->num() );
+                    $val = $eval->param( $val->idx() );
                 }
                 elsif ( defined( _INSTANCE( $val, 'SQL::Statement::Term' ) ) )
                 {
@@ -959,7 +960,7 @@ sub SELECT($$)
     {
         if ( _INSTANCE( $column, 'SQL::Statement::Param' ) )
         {
-            my $val = $eval->param( $column->num() );
+            my $val = $eval->param( $column->idx() );
             if ( -1 != ( my $idx = index( $val, '.' ) ) )
             {
                 $col = substr( $val, 0, $idx );
@@ -2262,12 +2263,12 @@ package SQL::Statement::Param;
 
 sub new
 {
-    my ( $class, $num ) = @_;
-    my $self = { 'num' => $num };
+    my ( $class, $idx ) = @_;
+    my $self = { 'idx' => $idx };
     return bless( $self, $class );
 }
 
-sub num ($) { $_[0]->{num}; }
+sub idx ($) { $_[0]->{idx}; }
 
 package SQL::Statement::Table;
 
