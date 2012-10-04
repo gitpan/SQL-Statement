@@ -1,8 +1,5 @@
 .aspell.local.pws
 Changes
-functions-patch/Functions-patch.txt
-functions-patch/testreport-verbose.txt
-functions-patch/testreport.txt
 lib/SQL/Dialects/ANSI.pm
 lib/SQL/Dialects/AnyData.pm
 lib/SQL/Dialects/CSV.pm
@@ -27,8 +24,6 @@ Makefile.PL
 MANIFEST
 MANIFEST.SKIP
 META.yml
-MYMETA.json
-MYMETA.yml
 README
 t/00error.t
 t/01prepare.t
