@@ -6,8 +6,8 @@ build_requires:
   Test::Simple: 0.90
 configure_requires:
   ExtUtils::MakeMaker: 0
-dynamic_config: 1
-generated_by: 'ExtUtils::MakeMaker version 6.62, CPAN::Meta::Converter version 2.120921'
+dynamic_config: 0
+generated_by: 'ExtUtils::MakeMaker version 6.56, CPAN::Meta::Converter version 2.120921'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -28,4 +28,4 @@ resources:
   license: http://dev.perl.org/licenses/
   repository: https://svn.perl.org/modules/SQL-Statement/trunk/
   x_MailingList: mailto:dbi-dev@perl.org
-version: 1.400
+version: 1.30

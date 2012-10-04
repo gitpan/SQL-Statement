@@ -1,5 +1,24 @@
 Changes log for Perl extension SQL::Statement
 
+Version 1.400, released July ......, 2011
+----------------------------------------------
+
+[Misc]
+* Switch to 3-digited minor version
+
+[Bug fixes]
+* undo literal replaces in subqueries before passing them to the
+  child parser
+* Fix doc typo RT#76764 (STEFFENW) - thanks Steffen
+* Fix typo documented in RT#71914 (reported by Ze'ev Atlas,
+  fixed by H.Merijn Brand) - thanks Ze'ev and Merijn
+
+[Improvements]
+* Improve documentation/tests for multiple JOIN's from RT#69573
+  (from BBYRD) with modifications
+* Filling in the SQL92 gaps for functions (BBYRD) from RT#72638
+  with minor modifications - thanks Brendan
+
 Version 1.33, released February 05th, 2011
 ----------------------------------------------
 
