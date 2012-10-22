@@ -1,0 +1,18 @@
+id,host,signature,message,time_stamp
+1,bert,/netbsd,"Copyright (c) 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,",1350900381
+2,bert,/netbsd,"2006, 2007, 2008, 2009, 2010",1350900381
+3,bert,/netbsd,"The NetBSD Foundation, Inc.  All rights reserved.",1350900381
+4,bert,/netbsd,"Copyright (c) 1982, 1986, 1989, 1991, 1993",1350900381
+5,bert,/netbsd,"The Regents of the University of California.  All rights reserved.",1350900381
+6,bert,/netbsd,,1350900381
+7,bert,/netbsd,"NetBSD 5.99.39 (BERT) #0: Fri Oct  8 06:23:03 CEST 2010",1350900381
+8,ernie,rpc.statd,starting,1350896781
+9,ernie,savecore,"no core dump",1350893181
+10,ernie,postfix/postfix-script,"starting the Postfix mail system",1350889581
+11,ernie,rpcbind,"connect from 127.0.0.1 to dump()",1350885981
+12,ernie,sshd,"last message repeated 2 times",1350882381
+13,ernie,shutdown,"poweroff by root:",1350878781
+14,ernie,shutdown,"rebooted by root",1350875181
+15,ernie,sshd,"Server listening on :: port 22.",1350871581
+16,ernie,sshd,"Server listening on 0.0.0.0 port 22.",1350867981
+17,ernie,sshd,"Received SIGHUP; restarting.",1350864381

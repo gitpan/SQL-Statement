@@ -40,6 +40,11 @@ t/17quoting.t
 t/23dialects.t
 t/SQLtest.pm
 t/TestLib.pm
+test_output_7484/baz
+test_output_7484/biz
+test_output_7484/log
+test_output_7484/numbers
+test_output_7484/trick
 xt/pod-cm.t
 xt/pod.t
 xt/pod_coverage.t
