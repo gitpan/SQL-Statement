@@ -28,4 +28,4 @@ resources:
   license: http://dev.perl.org/licenses/
   repository: https://svn.perl.org/modules/SQL-Statement/trunk/
   x_MailingList: mailto:dbi-dev@perl.org
-version: 1.400
+version: 1.401
