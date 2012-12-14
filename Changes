@@ -3,8 +3,16 @@ Changes log for Perl extension SQL::Statement
 Version 1.402, released xx xx, xxxx
 -------------------------------------------------
 
+[Misc]
+* add Math::Complex 1.56 as recommendation (RT#81926, Sam Ferencik)
+* add Math::BigInt 1.88 as recommendation (RT#81927, Sam Ferencik)
+* clarify Test::Simple 1.90 is required for building (RT#81925, Sam Ferencik)
+
 [Bug fixes]
 * fix leaking reference to open tables outside SQL::Statement::execute
+  (fixes RT#81523)
+* looks_like_number identifies 'nan' as number sometimes (add regex to
+  t/06virtual.t)
 
 Version 1.401, released October 29, 2012
 -------------------------------------------------

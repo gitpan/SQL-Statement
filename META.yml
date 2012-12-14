@@ -3,6 +3,8 @@ abstract: 'SQL parsing and processing engine'
 author:
   - 'Jeff Zucker <jeff@vpservices.com>, Jens Rehsack <rehsack@cpan.org>'
 build_requires:
+  Math::BigInt: 1.88
+  Math::Complex: 1.56
   Test::Simple: 0.90
 configure_requires:
   ExtUtils::MakeMaker: 0
@@ -17,6 +19,9 @@ no_index:
   directory:
     - t
     - inc
+recommends:
+  Math::BigInt: 1.88
+  Math::Complex: 1.56
 requires:
   Carp: 0
   Clone: 0.30

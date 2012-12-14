@@ -28,6 +28,8 @@ sub near ($$$) {
     my $d = $_[1] ? abs($_[0]/$_[1] - 1) : abs($_[0]);
     local $Test::Builder::Level = $Test::Builder::Level + 1;
     looks_like_number($_[0]) or return cmp_ok($_[0], "eq", $_[1], "near? $_[0] ~= $_[1]");
+    $_[0] =~ m/nan/i and return cmp_ok($_[0], "eq", $_[1], "near? $_[0] ~= $_[1]");
+    $_[0] =~ m/inf/i and return cmp_ok($_[0], "eq", $_[1], "near? $_[0] ~= $_[1]");
     cmp_ok($d, '<', $eps, "$_[2] => near? $_[0] ~= $_[1]") or diag("near? $_[0] ~= $_[1]");
 }
 #
@@ -36,7 +38,7 @@ SKIP:
 foreach my $test_dbd (@test_dbds)
 {
     my $dbh;
-    diag("Running tests for $test_dbd");
+    note("Running tests for $test_dbd");
     my $temp = "";
     # XXX
     # my $test_dbd_tbl = "${test_dbd}::Table";

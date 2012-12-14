@@ -22,6 +22,8 @@
    "prereqs" : {
       "build" : {
          "requires" : {
+            "Math::BigInt" : "1.88",
+            "Math::Complex" : "1.56",
             "Test::Simple" : "0.90"
          }
       },
@@ -31,6 +33,10 @@
          }
       },
       "runtime" : {
+         "recommends" : {
+            "Math::BigInt" : "1.88",
+            "Math::Complex" : "1.56"
+         },
          "requires" : {
             "Carp" : "0",
             "Clone" : "0.30",

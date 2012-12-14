@@ -1,0 +1,186 @@
+Index: t/TestLib.pm
+===================================================================
+--- t/TestLib.pm	(revision 15421)
++++ t/TestLib.pm	(working copy)
+@@ -17,7 +17,7 @@
+ my $test_pass = delete $ENV{DBI_PASS};
+ 
+ my $test_dir;
+-END { defined($test_dir) and rmtree $test_dir }
++# END { defined($test_dir) and rmtree $test_dir }
+ 
+ sub test_dir
+ {
+@@ -109,10 +109,10 @@
+         while ( my ( $m, $v ) = each %req )
+         {
+             my ( $ok, $msg ) = check_mod( $m, $v );
+-##	    if ( !$ok and $INC{'Test/More.pm'} )
+-##	    {
+-##		Test::More::diag($msg);
+-##	    }
++	    if ( !$ok and $INC{'Test/More.pm'} )
++	    {
++		Test::More::note($msg);
++	    }
+             $ok and $recommends{$m} = $msg;
+         }
+     }
+@@ -352,7 +352,7 @@
+ 
+ sub finish
+ {
+-    delete $_[0]->{stmt};
++    delete $_[0]->{stmt}->{data};
+ }
+ 
+ package TestLib::DBD;
+@@ -510,7 +510,7 @@
+ 
+ sub finish
+ {
+-    delete $_[0]->{sth};
++    $_[0]->{sth}->finish();
+ }
+ 
+ 1;
+Index: t/05simple.t
+===================================================================
+--- t/05simple.t	(revision 15412)
++++ t/05simple.t	(working copy)
+@@ -6,6 +6,7 @@
+ use Test::More;
+ use TestLib qw(connect prove_reqs show_reqs test_dir default_recommended);
+ 
++use Clone qw(clone);
+ use Params::Util qw(_CODE _ARRAY);
+ 
+ my ( $required, $recommended ) = prove_reqs( { default_recommended(), ( MLDBM => 0 ) } );
+@@ -19,7 +20,7 @@
+ foreach my $test_dbd (@test_dbds)
+ {
+     my $dbh;
+-    diag("Running tests for $test_dbd");
++    note("Running tests for $test_dbd");
+     my $temp = "";
+     # XXX
+     # my $test_dbd_tbl = "${test_dbd}::Table";
+@@ -54,8 +55,15 @@
+                     }
+                   );
+ 
+-    my ( $sth, $str );
++    my $vsql = "SELECT * FROM multi_fruit ORDER BY dKey DESC";
++    my $vsth = $dbh->prepare($vsql);
++    ok($vsth, "prepare <$vsql> using '$test_dbd'") or diag($dbh->errstr || 'unknown error');
+ 
++    # evil hack to avoid full dbi emulating in TestLib
++    my %store;
++    defined $dbh->{stmt} and $store{stmt} = $dbh->{stmt};
++    defined $dbh->{sth} and $store{sth} = $dbh->{sth};
++
+     # basic tests taken from DBD::DBM simple tests - should work overall
+     my @tests = (
+     	"DROP TABLE IF EXISTS multi_fruit", -1,
+@@ -64,15 +72,38 @@
+ 	"INSERT INTO  multi_fruit VALUES (2,'to_change',  0 )", 1,
+ 	"INSERT INTO  multi_fruit VALUES (3, NULL      , 13 )", 1,
+ 	"INSERT INTO  multi_fruit VALUES (4,'to_delete', 14 )", 1,
++	undef, [
++	    [ 4, 'to_delete', 14 ],
++	    [ 3, undef, 13 ],
++	    [ 2, 'to_change', 0 ],
++	    [ 1, 'oranges', 11 ],
++	],
+ 	"INSERT INTO  multi_fruit VALUES (?,?,?); #5,via placeholders,15", 1,
++	undef, [
++	    [ 5, 'via placeholders', 15 ],
++	    [ 4, 'to_delete', 14 ],
++	    [ 3, undef, 13 ],
++	    [ 2, 'to_change', 0 ],
++	    [ 1, 'oranges', 11 ],
++	],
+ 	"INSERT INTO  multi_fruit VALUES (6,'to_delete', 16 )", 1,
+ 	"INSERT INTO  multi_fruit VALUES (7,'to delete', 17 )", 1,
+ 	"INSERT INTO  multi_fruit VALUES (8,'to remove', 18 )", 1,
+ 	"UPDATE multi_fruit SET dVal='apples', qux='12' WHERE dKey=2", 1,
++	undef, [
++	    [ 8, 'to remove', 18 ],
++	    [ 7, 'to delete', 17 ],
++	    [ 6, 'to_delete', 16 ],
++	    [ 5, 'via placeholders', 15 ],
++	    [ 4, 'to_delete', 14 ],
++	    [ 3, undef, 13 ],
++	    [ 2, 'apples', 12 ],
++	    [ 1, 'oranges', 11 ],
++	],
+ 	"DELETE FROM  multi_fruit WHERE dVal='to_delete'", 2,
+ 	"DELETE FROM  multi_fruit WHERE qux=17", 1,
+ 	"DELETE FROM  multi_fruit WHERE dKey=8", 1,
+-	"SELECT * FROM multi_fruit ORDER BY dKey DESC", [
++	undef, [
+ 	    [ 5, 'via placeholders', 15 ],
+ 	    [ 3, undef, 13 ],
+ 	    [ 2, 'apples', 12 ],
+@@ -88,13 +119,26 @@
+ 	$idx % 2 and next;
+ 	my $sql = $tests[$idx];
+ 	my $result = $tests[$idx+1];
+-        $sql =~ s/;$//;
++	my ($comment, $sth);
+ 
+-        $sql =~ s/\s*;\s*(?:#(.*))//;
+-        my $comment = $1;
++        if( defined $sql )
++	{
++	    $sql =~ s/;$//;
++	    $sql =~ s/\s*;\s*(?:#(.*))//;
++	    $comment = $1;
+ 
+-        my $sth = $dbh->prepare($sql);
+-        ok($sth, "prepare <$sql> using '$test_dbd'") or diag($dbh->errstr || 'unknown error');
++	    $sth = $dbh->prepare($sql);
++	    ok($sth, "prepare <$sql> using '$test_dbd'") or diag($dbh->errstr || 'unknown error');
++	}
++	else
++	{
++	    $sql = $vsql;
++	    $sth = $vsth;
++	    $comment = undef;
++	    # evil hack to avoid full dbi emulating in TestLib
++	    defined $store{stmt} and $dbh->{stmt} = $store{stmt};
++	    defined $store{sth} and $dbh->{sth} = $store{sth};
++	}
+ 
+ 	my @bind;
+ #	if($sth->{NUM_OF_PARAMS})
+@@ -107,7 +151,7 @@
+         ok($n, "execute <$sql> using '$test_dbd'") or diag($sth->errstr || 'unknown error');
+         next if (!defined($n));
+ 
+-	is( $n, $result, $sql ) unless( 'ARRAY' eq ref $result );
++	is( $n, $result, "execute($sql) == $result using '$test_dbd'") unless( 'ARRAY' eq ref $result );
+ 	TODO: {
+ 	    local $TODO = "AUTOPROXY drivers might throw away sth->rows()" if($ENV{DBI_AUTOPROXY});
+ 	    is( $n, $sth->rows(), "\$sth->execute($sql) == \$sth->rows using $test_dbd") if( $sql =~ m/^(?:UPDATE|DELETE)/ );
+@@ -115,8 +159,19 @@
+         next unless $sql =~ /SELECT/;
+ 	my $allrows = $sth->fetch_rows();
+ 	my $expected_rows = $result;
+-	is( $sth->rows, scalar( @{$expected_rows} ), $sql );
++	is( $sth->rows, scalar( @{$expected_rows} ), "execute <$sql> == " . scalar( @{$expected_rows} ) . " using '$test_dbd'" );
+ 	is_deeply( $allrows, $expected_rows, "SELECT results for $sql using $test_dbd" );
++
++	# run SELECT 2nd time to test bug from RT#
++	$sth->finish();
++        $n = $sth->execute(@bind);
++        ok($n, "execute <$sql> using '$test_dbd' 2nd time") or diag($sth->errstr || 'unknown error');
++
++	is( $n, $result, "execute($sql) == $result using '$test_dbd'") unless( 'ARRAY' eq ref $result );
++	$allrows = $sth->fetch_rows();
++	$expected_rows = $result;
++	is( $sth->rows, scalar( @{$expected_rows} ), "execute <$sql> == " . scalar( @{$expected_rows} ) . " using '$test_dbd'" );
++	is_deeply( $allrows, $expected_rows, "SELECT results for $sql using '$test_dbd' 2nd time" );
+     }
+ }
+ 
