@@ -23,9 +23,7 @@ lib/SQL/Statement/Util.pm
 Makefile.PL
 MANIFEST
 MANIFEST.SKIP
-META.yml
 README
-rt-81523.patch
 t/00error.t
 t/01prepare.t
 t/02execute.t
@@ -44,4 +42,5 @@ t/TestLib.pm
 xt/pod-cm.t
 xt/pod.t
 xt/pod_coverage.t
+META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
