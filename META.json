@@ -35,7 +35,8 @@
       "runtime" : {
          "recommends" : {
             "Math::BigInt" : "1.88",
-            "Math::Complex" : "1.56"
+            "Math::Complex" : "1.56",
+            "Text::Soundex" : "3.03_01"
          },
          "requires" : {
             "Carp" : "0",
@@ -57,5 +58,5 @@
       },
       "x_MailingList" : "mailto:dbi-dev@perl.org"
    },
-   "version" : "1.403"
+   "version" : "1.404"
 }

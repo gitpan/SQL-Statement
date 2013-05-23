@@ -226,7 +226,7 @@ ODBC 3.0 functions that are implemented with differences include:
 =cut
 
 use vars qw($VERSION);
-$VERSION = '1.403';
+$VERSION = '1.404';
 
 =pod
 
@@ -875,7 +875,7 @@ use warnings 'all';
 sub SQL_FUNCTION_SOUNDEX
 {
     my ( $self, $owner, @params ) = @_;
-    require Text::Soundex;
+    exists $INC{'Text/Soundex.pm'} or require Text::Soundex;
     my $s1 = Text::Soundex::soundex( $params[0] ) or return 0;
     my $s2 = Text::Soundex::soundex( $params[1] ) or return 0;
     return ( $s1 eq $s2 ) ? 1 : 0;
