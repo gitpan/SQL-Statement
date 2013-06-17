@@ -34,4 +34,4 @@ resources:
   license: http://dev.perl.org/licenses/
   repository: https://github.com/perl5-dbi/SQL-Statement
   x_MailingList: mailto:dbi-dev@perl.org
-version: 1.404
+version: 1.405
